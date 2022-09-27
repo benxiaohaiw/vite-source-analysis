@@ -219,7 +219,7 @@ export function cssPlugin(config: ResolvedConfig): Plugin {
         modules,
         deps,
         map
-      } = await compileCSS(
+      } = await compileCSS( // 编译css
         id,
         raw,
         config,
@@ -240,7 +240,7 @@ export function cssPlugin(config: ResolvedConfig): Plugin {
 
       // dev
       if (server) {
-        // server only logic for handling CSS @import dependency hmr
+        // server only logic for handling CSS @import dependency hmr // 需要去处理css中的@import依赖的css的hmr（热模块替换）
         const { moduleGraph } = server
         const thisModule = moduleGraph.getModuleById(id)
         const devBase = config.base
@@ -357,6 +357,7 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
         !inlined &&
         dataToEsm(modules, { namedExports: true, preferConst: true })
 
+      // 对于开发时转换的最终css代码其实就是一段包含css字符串的js代码
       if (config.command === 'serve') {
         const getContentWithSourcemap = async (content: string) => {
           if (config.css?.devSourcemap) {
@@ -385,8 +386,8 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
             path.posix.join(devBase, CLIENT_PUBLIC_PATH)
           )}`,
           `const __vite__id = ${JSON.stringify(id)}`,
-          `const __vite__css = ${JSON.stringify(cssContent)}`,
-          `__vite__updateStyle(__vite__id, __vite__css)`,
+          `const __vite__css = ${JSON.stringify(cssContent)}`, // 直接转为字符串交给__vite__css保存
+          `__vite__updateStyle(__vite__id, __vite__css)`, // 使用客户端的函数进行更新样式
           // css modules exports change on edit so it can't self accept
           `${
             modulesCode ||
@@ -394,7 +395,7 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
           }`,
           `import.meta.hot.prune(() => __vite__removeStyle(__vite__id))`
         ].join('\n')
-        return { code, map: { mappings: '' } }
+        return { code, map: { mappings: '' } } // 直接把最终的代码返回就好
       }
 
       // build CSS handling ----------------------------------------------------
@@ -444,6 +445,7 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
       }
     },
 
+    // 下面这两个钩子函数都是build时对rollup进行的操作处理
     async renderChunk(code, chunk, opts) {
       let chunkCSS = ''
       let isPureCssChunk = true
@@ -608,6 +610,7 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
       return null
     },
 
+    // build时rollup生成css的bundle文件
     async generateBundle(opts, bundle) {
       // @ts-ignore asset emits are skipped in legacy bundle
       if (opts.__vite_skip_asset_emit__) {
@@ -662,7 +665,7 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
       if (extractedCss && !hasEmitted) {
         hasEmitted = true
         extractedCss = await finalizeCss(extractedCss, true, config)
-        this.emitFile({
+        this.emitFile({ // 发射文件
           name: cssBundleName,
           type: 'asset',
           source: extractedCss
@@ -728,6 +731,7 @@ function getCssResolversKeys(
   return Object.keys(resolvers) as unknown as Array<keyof CSSAtImportResolvers>
 }
 
+// 编译css
 async function compileCSS(
   id: string,
   code: string,
@@ -755,6 +759,7 @@ async function compileCSS(
   const postcssConfig = await resolvePostcssConfig(config)
   const lang = id.match(cssLangRE)?.[1] as CssLang | undefined
 
+  // 对于纯css来讲不需要进行处理，直接返回css代码就好
   // 1. plain css that needs no processing
   if (
     lang === 'css' &&

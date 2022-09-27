@@ -6,7 +6,7 @@ import type { ServerOptions } from './server'
 import type { LogLevel } from './logger'
 import { createLogger } from './logger'
 import { VERSION } from './constants'
-import { resolveConfig } from '.'
+import { resolveConfig } from '.' // 来自当前目录下的index.ts
 
 const cli = cac('vite')
 
@@ -89,7 +89,7 @@ cli
         clearScreen: options.clearScreen,
         optimizeDeps: { force: options.force },
         server: cleanOptions(options)
-      })
+      }) // 创建一个server
 
       if (!server.httpServer) {
         throw new Error('HTTP server not available')

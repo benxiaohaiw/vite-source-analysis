@@ -41,13 +41,13 @@ export function createDevHtmlTransformFn(
   server: ViteDevServer
 ): (url: string, html: string, originalUrl: string) => Promise<string> {
   const [preHooks, postHooks] = resolveHtmlTransforms(server.config.plugins)
-  return (url: string, html: string, originalUrl: string): Promise<string> => {
+  return (url: string, html: string, originalUrl: string): Promise<string> => { // 返回的该函数就是server下的transformIndexHtml函数
     return applyHtmlTransforms(
-      html,
+      html, // html内容字符串
       [
         preImportMapHook(server.config),
         ...preHooks,
-        devHtmlHook,
+        devHtmlHook, // 内置的开发html钩子
         ...postHooks,
         postImportMapHook()
       ],
@@ -187,20 +187,23 @@ const devHtmlHook: IndexHtmlTransformHook = async (
     s.overwrite(
       node.sourceCodeLocation!.startOffset,
       node.sourceCodeLocation!.endOffset,
-      `<script type="module" src="${modulePath}"></script>`,
+      `<script type="module" src="${modulePath}"></script>`, // 重写成外部资源引入的方式
       { contentOnly: true }
     )
   }
 
+  // 迭代html
   await traverseHtml(html, htmlPath, (node) => {
     if (!nodeIsElement(node)) {
       return
     }
 
+    // script元素
     // script tags
     if (node.nodeName === 'script') {
       const { src, sourceCodeLocation, isModule } = getScriptInfo(node)
 
+      // 如果有src那说明是外部引入，直接处理节点的url就行啦
       if (src) {
         processNodeUrl(
           src,
@@ -211,26 +214,30 @@ const devHtmlHook: IndexHtmlTransformHook = async (
           originalUrl,
           moduleGraph
         )
-      } else if (isModule && node.childNodes.length) {
-        addInlineModule(node, 'js')
+      } else if (isModule && node.childNodes.length) { // 如果是type是module且是内联（没有src，在标签内部写了esm代码）
+        addInlineModule(node, 'js') // 增加内联模块
+        // 把内联模块转为外部脚本形式，其中的内联代码会被取出存入一个Map中
       }
     }
 
+    // style元素且元素标签中有内容
     if (node.nodeName === 'style' && node.childNodes.length) {
       const children = node.childNodes[0] as DefaultTreeAdapterMap['textNode']
       styleUrl.push({
         start: children.sourceCodeLocation!.startOffset,
         end: children.sourceCodeLocation!.endOffset,
-        code: children.value
+        code: children.value // style标签的内容
       })
     }
 
+    // 像link标签...
+    // 带有href/src属性的元素
     // elements with [href/src] attrs
     const assetAttrs = assetAttrsConfig[node.nodeName]
     if (assetAttrs) {
       for (const p of node.attrs) {
         if (p.value && assetAttrs.includes(p.name)) {
-          processNodeUrl(
+          processNodeUrl( // 处理节点带有url值的属性，也就是只重写url
             p,
             node.sourceCodeLocation!.attrs![p.name],
             s,
@@ -248,19 +255,20 @@ const devHtmlHook: IndexHtmlTransformHook = async (
       const url = `${proxyModulePath}?html-proxy&direct&index=${index}.css`
 
       // ensure module in graph after successful load
-      const mod = await moduleGraph.ensureEntryFromUrl(url, false)
-      ensureWatchedFile(watcher, mod.file, config.root)
+      const mod = await moduleGraph.ensureEntryFromUrl(url, false) // 确保模块图中有该url对应的mod
+      ensureWatchedFile(watcher, mod.file, config.root) // 确保观察此文件，实际上可以认为就是当前的index.html文件
 
-      const result = await server!.pluginContainer.transform(code, mod.id!)
-      s.overwrite(start, end, result?.code || '')
+      const result = await server!.pluginContainer.transform(code, mod.id!) // 使用插件容器直接对内联样式代码做了一个转换处理
+      s.overwrite(start, end, result?.code || '') // 然后也是直接把处理后的代码给重写回去
+      // 对于样式内联代码并没有取出做缓存
     })
   )
 
   html = s.toString()
 
   return {
-    html,
-    tags: [
+    html, // 转换后的html字符串
+    tags: [ // 添加一个<script type="module" src="/@vite/client"></script>标签到head-prepend这个位置
       {
         tag: 'script',
         attrs: {
@@ -283,14 +291,14 @@ export function indexHtmlMiddleware(
     }
 
     const url = req.url && cleanUrl(req.url)
-    // spa-fallback always redirects to /index.html
-    if (url?.endsWith('.html') && req.headers['sec-fetch-dest'] !== 'script') {
+    // spa-fallback always redirects to /index.html // spa回退中间件总是重定向到/index.html
+    if (url?.endsWith('.html') && req.headers['sec-fetch-dest'] !== 'script') { // 是.html结尾且sec-fetch-dest请求头不是script
       const filename = getHtmlFilename(url, server)
-      if (fs.existsSync(filename)) {
+      if (fs.existsSync(filename)) { // 若此文件存在
         try {
-          let html = fs.readFileSync(filename, 'utf-8')
-          html = await server.transformIndexHtml(url, html, req.originalUrl)
-          return send(req, res, html, 'html', {
+          let html = fs.readFileSync(filename, 'utf-8') // 读取文件内容
+          html = await server.transformIndexHtml(url, html, req.originalUrl) // 调用server下的transformIndexHtml函数
+          return send(req, res, html, 'html', { // 发送回去
             headers: server.config.server.headers
           })
         } catch (e) {

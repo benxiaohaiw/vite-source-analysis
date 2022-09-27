@@ -57,7 +57,7 @@ export async function resolvePlugins(
             : optimizedDepsPlugin(config)
         ]
       : []),
-    resolvePlugin({
+    resolvePlugin({ // 解析插件
       ...config.resolve,
       root: config.root,
       isProduction: config.isProduction,
@@ -72,9 +72,9 @@ export async function resolvePlugins(
           : undefined
     }),
     htmlInlineProxyPlugin(config),
-    cssPlugin(config),
+    cssPlugin(config), // css插件
     config.esbuild !== false ? esbuildPlugin(config.esbuild) : null,
-    jsonPlugin(
+    jsonPlugin( // json插件
       {
         namedExports: true,
         ...config.json
@@ -83,11 +83,11 @@ export async function resolvePlugins(
     ),
     wasmHelperPlugin(config),
     webWorkerPlugin(config),
-    assetPlugin(config),
+    assetPlugin(config), // 静态资源如.svg、.png...
     ...normalPlugins,
     wasmFallbackPlugin(),
     definePlugin(config),
-    cssPostPlugin(config),
+    cssPostPlugin(config), // css后置插件
     isBuild && config.build.ssr ? ssrRequireHookPlugin(config) : null,
     isBuild && buildHtmlPlugin(config),
     workerImportMetaUrlPlugin(config),
@@ -100,7 +100,7 @@ export async function resolvePlugins(
     // internal server-only plugins are always applied after everything else
     ...(isBuild
       ? []
-      : [clientInjectionsPlugin(config), importAnalysisPlugin(config)])
+      : [clientInjectionsPlugin(config), importAnalysisPlugin(config)]) // 客户端注入插件、导入分析插件
   ].filter(Boolean) as Plugin[]
 }
 

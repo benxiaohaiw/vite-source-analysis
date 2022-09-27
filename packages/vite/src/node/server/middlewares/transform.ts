@@ -159,41 +159,64 @@ export function transformMiddleware(
         // not valid browser import specifiers by the importAnalysis plugin.
         url = unwrapId(url)
 
+        // ***
+        // importAnalysisPlugin中的transform函数所做的提前处理 ------
+        // vite v3.1.3的测试数据
+        // main.js
+        //   import './style.css' -> import '/style.css'
+        //   import javascriptLogo from './javascript.svg' -> import javascriptLogo from '/javascript.svg?import' -> /javascript.svg?import -> export default '/javascript.svg'
+        //   import { setupCounter } from './counter.js' -> import { setupCounter } from '/counter.js'
+        // style.css
+        // ***
+
+        // 对于css来讲需要去区分正常css请求和导入css请求
+        // vitejs.dev
+        // /index.html
+        //   <link rel="stylesheet" href="/assets/style.89d7223d.css"> -> vitejs.dev/assets/style.89d7223d.css -> 请求头中是会带有accept: text/css,*/*;q=0.1
+        // 而对于上述的import './style.css'来讲 -> import '/style.css' -> 请求头中是没有accept: text/css,*/*;q=0.1的，所以靠这个请求头参数就可以
+        // 来进行区分是正常的link css请求还是import css请求啦 ~
+
         // for CSS, we need to differentiate between normal CSS requests and
         // imports
         if (
           isCSSRequest(url) &&
           !isDirectRequest(url) &&
-          req.headers.accept?.includes('text/css')
+          req.headers.accept?.includes('text/css') // import css请求是没有该请求头的，所以false
         ) {
-          url = injectQuery(url, 'direct')
+          url = injectQuery(url, 'direct') // 对于link标签的css请求（正常css请求）需要注入direct
         }
 
+        // 检测是否可以较早的返回304
         // check if we can return 304 early
-        const ifNoneMatch = req.headers['if-none-match']
+        const ifNoneMatch = req.headers['if-none-match'] // 第一次请求没有这个请求头，之后的请求就会有这个请求头，且它的值是第一次请求响应时的etag响应头的值
         if (
           ifNoneMatch &&
           (await moduleGraph.getModuleByUrl(url, false))?.transformResult
-            ?.etag === ifNoneMatch
+            ?.etag === ifNoneMatch // 在这里的值其实是hash，对比一下客户端带过来的hash值和服务端这里这个模块的hash是否变化了，若没有变化-
+            // 则直接返回304告诉浏览器服务器资源没有变化，然后使用上次请求响应的结果缓存就可以啦 ~
         ) {
+          // https://www.cnblogs.com/andong2015/p/13437586.html
           isDebug && debugCache(`[304] ${prettifyUrl(url, root)}`)
           res.statusCode = 304
           return res.end()
         }
 
+        // 使用插件容器进行经典三部曲：解析 -> 加载 -> 转换
+        // 产生最终的结果
         // resolve, load and transform using the plugin container
         const result = await transformRequest(url, server, {
           html: req.headers.accept?.includes('text/html')
         })
         if (result) {
+          // 获取依赖优化器
           const depsOptimizer = getDepsOptimizer(server.config, false) // non-ssr
-          const type = isDirectCSSRequest(url) ? 'css' : 'js'
+          const type = isDirectCSSRequest(url) ? 'css' : 'js' // 类型 -> 响应类型
           const isDep =
-            DEP_VERSION_RE.test(url) || depsOptimizer?.isOptimizedDepUrl(url)
+            DEP_VERSION_RE.test(url) || depsOptimizer?.isOptimizedDepUrl(url) // 对url做判断是否为依赖请求的url
           return send(req, res, result.code, type, {
-            etag: result.etag,
+            etag: result.etag, // 结果的etag，其实就是文件内容的hash
             // allow browser to cache npm deps!
-            cacheControl: isDep ? 'max-age=31536000,immutable' : 'no-cache',
+            cacheControl: isDep ? 'max-age=31536000,immutable' : 'no-cache', // 允许浏览器去缓存npm依赖，若不是依赖则不缓存
             headers: server.config.server.headers,
             map: result.map
           })

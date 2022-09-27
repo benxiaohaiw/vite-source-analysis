@@ -299,6 +299,8 @@ export interface ResolvedServerUrls {
 export async function createServer(
   inlineConfig: InlineConfig = {}
 ): Promise<ViteDevServer> {
+  // 解析配置
+  // 其中会把内置插件默认应用
   const config = await resolveConfig(inlineConfig, 'serve', 'development')
   const { root, server: serverConfig } = config
   const httpsOptions = await resolveHttpsConfig(config.server.https)
@@ -309,6 +311,7 @@ export async function createServer(
     ...serverConfig.watch
   })
 
+  // 使用connect库
   const middlewares = connect() as Connect.Server
   const httpServer = middlewareMode
     ? null
@@ -319,15 +322,18 @@ export async function createServer(
     setClientErrorHandler(httpServer, config.logger)
   }
 
+  // 文件观察者
   const watcher = chokidar.watch(
     path.resolve(root),
     resolvedWatchOptions
   ) as FSWatcher
 
+  // 造一个模块图
   const moduleGraph: ModuleGraph = new ModuleGraph((url, ssr) =>
     container.resolveId(url, undefined, { ssr })
   )
 
+  // 创建插件容器
   const container = await createPluginContainer(config, moduleGraph, watcher)
   const closeHttpServer = createServerCloseFn(httpServer)
 
@@ -376,8 +382,8 @@ export async function createServer(
     ssrRewriteStacktrace(stack: string) {
       return ssrRewriteStacktrace(stack, moduleGraph)
     },
-    async listen(port?: number, isRestart?: boolean) {
-      await startServer(server, port, isRestart)
+    async listen(port?: number, isRestart?: boolean) { // listen方法
+      await startServer(server, port, isRestart) // 开启服务器
       if (httpServer) {
         server.resolvedUrls = await resolveServerUrls(
           httpServer,
@@ -404,7 +410,7 @@ export async function createServer(
       ])
       server.resolvedUrls = null
     },
-    printUrls() {
+    printUrls() { // 打印urls
       if (server.resolvedUrls) {
         printServerUrls(
           server.resolvedUrls,
@@ -463,6 +469,7 @@ export async function createServer(
     return setPackageData(id, pkg)
   }
 
+  // 给文件观察者添加对应文件动作的回调函数
   watcher.on('change', async (file) => {
     file = normalizePath(file)
     if (file.endsWith('/package.json')) {
@@ -509,12 +516,14 @@ export async function createServer(
     middlewares.use(timeMiddleware(root))
   }
 
+  // 默认开启跨域
   // cors (enabled by default)
   const { cors } = serverConfig
   if (cors !== false) {
     middlewares.use(corsMiddleware(typeof cors === 'boolean' ? {} : cors))
   }
 
+  // 代理
   // proxy
   const { proxy } = serverConfig
   if (proxy) {
@@ -530,6 +539,7 @@ export async function createServer(
   // open in editor support
   middlewares.use('/__open-in-editor', launchEditorMiddleware())
 
+  // 服务在/public下的静态文件
   // serve static files under /public
   // this applies before the transform middleware so that these files are served
   // as-is without transforms.
@@ -539,16 +549,20 @@ export async function createServer(
     )
   }
 
+  // 核心
+  // 主要转换中间件
   // main transform middleware
-  middlewares.use(transformMiddleware(server))
+  middlewares.use(transformMiddleware(server)) // 核心函数 -> transformMiddleware
 
+  // 服务静态文件中间件
   // serve static files
   middlewares.use(serveRawFsMiddleware(server))
   middlewares.use(serveStaticMiddleware(root, server))
 
+  // 单页面应用回退中间件
   // spa fallback
   if (config.appType === 'spa') {
-    middlewares.use(spaFallbackMiddleware(root))
+    middlewares.use(spaFallbackMiddleware(root)) // 主要功能就是把请求的url回退到/index.html
   }
 
   // run post config hooks
@@ -558,7 +572,7 @@ export async function createServer(
 
   if (config.appType === 'spa' || config.appType === 'mpa') {
     // transform index.html
-    middlewares.use(indexHtmlMiddleware(server))
+    middlewares.use(indexHtmlMiddleware(server)) // 转换index.html
 
     // handle 404s
     // Keep the named function. The name is visible in debug logs via `DEBUG=connect:dispatcher ...`
@@ -568,6 +582,7 @@ export async function createServer(
     })
   }
 
+  // 错误处理中间件
   // error handler
   middlewares.use(errorMiddleware(server, middlewareMode))
 
@@ -581,10 +596,11 @@ export async function createServer(
       return initingServer
     }
     initingServer = (async function () {
-      await container.buildStart({})
-      if (isDepsOptimizerEnabled(config, false)) {
+      await container.buildStart({}) // 触发插件容器 -> 构建开始阶段
+      // ssr ? config.ssr.optimizeDeps : config.optimizeDeps -> disabled属性可控制是否开启
+      if (isDepsOptimizerEnabled(config, false)) { // 依赖优化器是否开启
         // non-ssr
-        await initDepsOptimizer(config, server)
+        await initDepsOptimizer(config, server) // 开启则初始化依赖优化器
       }
       initingServer = undefined
       serverInited = true
@@ -595,14 +611,14 @@ export async function createServer(
   if (!middlewareMode && httpServer) {
     // overwrite listen to init optimizer before server start
     const listen = httpServer.listen.bind(httpServer)
-    httpServer.listen = (async (port: number, ...args: any[]) => {
+    httpServer.listen = (async (port: number, ...args: any[]) => { // 在服务器启动之前重写listen方法以便于可以初始化optimizer优化器
       try {
-        await initServer()
+        await initServer() // 初始化优化器
       } catch (e) {
         httpServer.emit('error', e)
         return
       }
-      return listen(port, ...args)
+      return listen(port, ...args) // 原先的listen方法
     }) as any
   } else {
     await initServer()
@@ -634,7 +650,7 @@ async function startServer(
     strictPort: options.strictPort,
     host: hostname.host,
     logger: server.config.logger
-  })
+  }) // 此方法会调用httpServer的listen方法
 
   // @ts-ignore
   const profileSession = global.__vite_profile_session

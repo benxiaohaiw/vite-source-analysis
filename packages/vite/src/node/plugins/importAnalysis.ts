@@ -705,12 +705,15 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
           )}`
         )
 
+      // 预（提前）转换在此文件内容中所知道的直接导入
+
       // pre-transform known direct imports
       // These requests will also be registered in transformRequest to be awaited
       // by the deps optimizer
       if (config.server.preTransformRequests && staticImportedUrls.size) {
         staticImportedUrls.forEach(({ url, id }) => {
           url = removeImportQuery(url)
+          // 主直接执行transformRequest函数，那么在其内部也是直接在当前执行期间向_pendingRequest中存入对应的请求
           transformRequest(url, server, { ssr }).catch((e) => {
             if (e?.code === ERR_OUTDATED_OPTIMIZED_DEP) {
               // This are expected errors
@@ -722,10 +725,24 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         })
       }
 
+      // 上面的预转换和下面的返回都是在同一执行期间执行的中间没有间隔，那所以可以肯定的说上面的transformRequest函数中所执行的
+      // 缓存请求的逻辑一定是在把内容响应给客户端之前就一定把它缓存在了server._pendingRequest中了
+      // 这一点是非常可以肯定的 ~
+
+      // 那么有了这一点关系证明后，那么之后客户端拿到代码内容再次发送请求当执行到transformRequest中时
+      // 有可能server._pendingRequest还有（说明还未处理完成，因为一旦处理好了之后就会清除）
+      // 也有可能没有，因为这个处理操作中间是要进行经典三部曲解析 -> 加载 -> 转换
+      // 可以实验一下我们在某个阶段写个异步钩子需要3s后才能成功
+      // 那么此时文件内容早已返回给了客户端，而客户端就会继续发送请求，此时执行到transformRequest这里发现还是有对应的待处理请求的
+      // 那么就会重用这个待处理请求
+
+      // 那如果客户端耽搁了3s，此时服务端的预转换早已执行完毕，客户端再发送请求，因为已经转换过了，直接使用转换过的结果就可（逻辑在transformRequest.ts中）
+
+      // 然后再去返回字符串内容进行响应的
       if (s) {
         return transformStableResult(s, importer, config)
       } else {
-        return source
+        return source // 在async中return也是需要去执行ecma262中Await算法的 ~
       }
     }
   }

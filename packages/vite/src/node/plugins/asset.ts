@@ -179,7 +179,7 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
 
       id = id.replace(urlRE, '$1').replace(/[\?&]$/, '')
       const url = await fileToUrl(id, config, this)
-      return `export default ${JSON.stringify(url)}`
+      return `export default ${JSON.stringify(url)}` // 返回的是路径的字符串
     },
 
     renderChunk(code, chunk, opts) {

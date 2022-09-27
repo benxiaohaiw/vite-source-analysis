@@ -138,6 +138,7 @@ type PluginContext = Omit<
   | 'load'
 >
 
+// acorn库的Parser方法
 export let parser = acorn.Parser
 
 export async function createPluginContainer(
@@ -147,13 +148,13 @@ export async function createPluginContainer(
 ): Promise<PluginContainer> {
   const isDebug = process.env.DEBUG
   const {
-    plugins,
+    plugins, // 从配置中获取所有的插件
     logger,
     root,
     build: { rollupOptions }
   } = config
   const { getSortedPluginHooks, getSortedPlugins } =
-    createPluginHookUtils(plugins)
+    createPluginHookUtils(plugins) // 创建插件相关的工具钩子
 
   const seenResolves: Record<string, true | undefined> = {}
   const debugResolve = createDebugger('vite:resolve')
@@ -204,6 +205,7 @@ export async function createPluginContainer(
     )
   }
 
+  // 钩子并行
   // parallel, ignores returns
   async function hookParallel<H extends AsyncPluginHooks & ParallelPluginHooks>(
     hookName: H,
@@ -654,7 +656,7 @@ export async function createPluginContainer(
       const ssr = options?.ssr
       const ctx = new TransformContext(id, code, inMap as SourceMap)
       ctx.ssr = !!ssr
-      for (const plugin of getSortedPlugins('transform')) {
+      for (const plugin of getSortedPlugins('transform')) { // 一一应用插件中的transform钩子函数
         if (!plugin.transform) continue
         ctx._activePlugin = plugin
         ctx._activeId = id
@@ -693,6 +695,7 @@ export async function createPluginContainer(
           code = result
         }
       }
+      // 把经过所有插件的transform钩子函数转换后的最终代码给进行返回即可
       return {
         code,
         map: ctx._getCombinedSourcemap()

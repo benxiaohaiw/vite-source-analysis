@@ -362,6 +362,7 @@ export type ResolveFn = (
   ssr?: boolean
 ) => Promise<string | undefined>
 
+// 解析配置
 export async function resolveConfig(
   inlineConfig: InlineConfig,
   command: 'build' | 'serve',
@@ -528,6 +529,7 @@ export async function resolveConfig(
     logger
   )
 
+  // 解析缓存目录
   // resolve cache directory
   const pkgPath = lookupFile(resolvedRoot, [`package.json`], { pathOnly: true })
   const cacheDir = config.cacheDir
@@ -540,6 +542,7 @@ export async function resolveConfig(
     ? createFilter(config.assetsInclude)
     : () => false
 
+  // 创建一个单独的解析者仅有别名、解析器插件构建的插件容器
   // create an internal resolver to be used in special scenarios, e.g.
   // optimizer & handling css @imports
   const createResolver: ResolvedConfig['createResolver'] = (options) => {
@@ -656,7 +659,7 @@ export async function resolveConfig(
     },
     logger,
     packageCache: new Map(),
-    createResolver,
+    createResolver, // 后面可以创建一个独自的解析者
     optimizeDeps: {
       disabled: 'build',
       ...optimizeDeps,
@@ -677,9 +680,11 @@ export async function resolveConfig(
   }
   const resolved: ResolvedConfig = {
     ...config,
-    ...resolvedConfig
+    ...resolvedConfig // 合并
   }
 
+  // 解析插件
+  // 其中包括应用内置插件
   ;(resolved.plugins as Plugin[]) = await resolvePlugins(
     resolved,
     prePlugins,
@@ -791,7 +796,7 @@ assetFileNames isn't equal for every build.rollupOptions.output. A single patter
     }
   }
 
-  return resolved
+  return resolved // 返回resolved
 }
 
 /**
@@ -912,14 +917,15 @@ export async function loadConfigFromFile(
   }
 
   try {
-    const bundled = await bundleConfigFile(resolvedPath, isESM)
+    const bundled = await bundleConfigFile(resolvedPath, isESM) // 对配置文件做打包
     const userConfig = await loadConfigFromBundledFile(
       resolvedPath,
       bundled.code,
       isESM
-    )
+    ) // 从打包后的文件中加载配置
     debug(`bundled config file loaded in ${getTime()}`)
 
+    // 获取到用户的配置
     const config = await (typeof userConfig === 'function'
       ? userConfig(configEnv)
       : userConfig)
@@ -947,11 +953,11 @@ async function bundleConfigFile(
   const dirnameVarName = '__vite_injected_original_dirname'
   const filenameVarName = '__vite_injected_original_filename'
   const importMetaUrlVarName = '__vite_injected_original_import_meta_url'
-  const result = await build({
+  const result = await build({ // 使用esbuild对配置文件做打包
     absWorkingDir: process.cwd(),
     entryPoints: [fileName],
     outfile: 'out.js',
-    write: false,
+    write: false, // 不写入
     target: ['node14.18', 'node16'],
     platform: 'node',
     bundle: true,
@@ -1051,12 +1057,12 @@ async function loadConfigFromBundledFile(
     const fileBase = `${fileName}.timestamp-${Date.now()}`
     const fileNameTmp = `${fileBase}.mjs`
     const fileUrl = `${pathToFileURL(fileBase)}.mjs`
-    fs.writeFileSync(fileNameTmp, bundledCode)
+    fs.writeFileSync(fileNameTmp, bundledCode) // 把打包后的内容写入
     try {
-      return (await dynamicImport(fileUrl)).default
+      return (await dynamicImport(fileUrl)).default // 使用import函数动态导入
     } finally {
       try {
-        fs.unlinkSync(fileNameTmp)
+        fs.unlinkSync(fileNameTmp) // 删除打包文件
       } catch {
         // already removed if this function is called twice simultaneously
       }
