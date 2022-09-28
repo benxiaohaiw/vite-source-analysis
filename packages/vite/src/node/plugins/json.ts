@@ -58,13 +58,14 @@ export function jsonPlugin(
               map: { mappings: '' }
             }
           } else {
-            return `export default JSON.parse(${JSON.stringify(json)})`
+            return `export default JSON.parse(${JSON.stringify(json)})` // stringify参数将导致是默认导出对象
           }
         }
 
+        // 直接使用JSON.parse方法进行解析转为对象
         const parsed = JSON.parse(json)
         return {
-          code: dataToEsm(parsed, {
+          code: dataToEsm(parsed, { // 把此数据转为esm的字符串作为转换后的代码
             preferConst: true,
             namedExports: options.namedExports
           }),

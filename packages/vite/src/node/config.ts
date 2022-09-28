@@ -542,7 +542,9 @@ export async function resolveConfig(
     ? createFilter(config.assetsInclude)
     : () => false
 
+  // ***
   // 创建一个单独的解析者仅有别名、解析器插件构建的插件容器
+  // ***
   // create an internal resolver to be used in special scenarios, e.g.
   // optimizer & handling css @imports
   const createResolver: ResolvedConfig['createResolver'] = (options) => {
@@ -659,7 +661,7 @@ export async function resolveConfig(
     },
     logger,
     packageCache: new Map(),
-    createResolver, // 后面可以创建一个独自的解析者
+    createResolver, // *** 后面可以创建一个单独的解析者仅有别名、解析器插件构建的插件容器 ***
     optimizeDeps: {
       disabled: 'build',
       ...optimizeDeps,
@@ -683,8 +685,10 @@ export async function resolveConfig(
     ...resolvedConfig // 合并
   }
 
+  // ***
   // 解析插件
-  // 其中包括应用内置插件
+  // 其中包括***应用内置插件***
+  // ***
   ;(resolved.plugins as Plugin[]) = await resolvePlugins(
     resolved,
     prePlugins,

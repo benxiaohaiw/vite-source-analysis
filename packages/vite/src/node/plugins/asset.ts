@@ -157,6 +157,9 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
       }
     },
 
+    // ***
+    // /javascript.svg?import -> export default '/javascript.svg'
+    // ***
     async load(id) {
       if (id.startsWith('\0')) {
         // Rollup convention, this id should be handled by the
@@ -178,8 +181,8 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
       }
 
       id = id.replace(urlRE, '$1').replace(/[\?&]$/, '')
-      const url = await fileToUrl(id, config, this)
-      return `export default ${JSON.stringify(url)}` // 返回的是路径的字符串
+      const url = await fileToUrl(id, config, this) // 把文件路径转为url
+      return `export default ${JSON.stringify(url)}` // 返回一段默认导出url的js字符串代码
     },
 
     renderChunk(code, chunk, opts) {

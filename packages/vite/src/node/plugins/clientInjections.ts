@@ -16,6 +16,9 @@ export function clientInjectionsPlugin(config: ResolvedConfig): Plugin {
   return {
     name: 'vite:client-inject',
     async transform(code, id, options) {
+      // ***
+      // vite库下的dist/client/client.mjs || dist/client/env.mjs路径
+      // ***
       if (id === normalizedClientEntry || id === normalizedEnvEntry) {
         const resolvedServerHostname = (
           await resolveHostname(config.server.host)
@@ -48,6 +51,9 @@ export function clientInjectionsPlugin(config: ResolvedConfig): Plugin {
           hmrBase = path.posix.join(hmrBase, hmrConfig.path)
         }
 
+        // ***
+        // 对vite库下的dist/client/client.mjs || dist/client/env.mjs路径文件中使用到的这些全部做一个替换
+        // ***
         return code
           .replace(`__MODE__`, JSON.stringify(config.mode))
           .replace(`__BASE__`, JSON.stringify(devBase))
@@ -69,6 +75,8 @@ export function clientInjectionsPlugin(config: ResolvedConfig): Plugin {
           config.define?.['process.env.NODE_ENV'] ||
             JSON.stringify(process.env.NODE_ENV || config.mode)
         )
+        // ***
+        // ***
       }
     }
   }

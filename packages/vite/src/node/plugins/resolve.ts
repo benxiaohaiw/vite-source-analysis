@@ -120,13 +120,17 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
   return {
     name: 'vite:resolve',
 
+    // 主要就是先尝试fs解析 -> 尝试优化解析 -> 尝试node解析
     async resolveId(id, importer, resolveOpts) {
       const ssr = resolveOpts?.ssr === true
 
+      // 我们需要将depsOptimizer延迟到这里，而不是将其作为选项传递
+      // resolvePlugin因为优化器是在dev期间在服务器listen上创建的
       // We need to delay depsOptimizer until here instead of passing it as an option
       // the resolvePlugin because the optimizer is created on server listen during dev
       const depsOptimizer = resolveOptions.getDepsOptimizer?.(ssr)
 
+      // id是否以__vite-browser-external开头的
       if (id.startsWith(browserExternalId)) {
         return id
       }
@@ -157,16 +161,19 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
 
       let res: string | PartialResolvedId | undefined
 
+      // 解决预构建deps请求，这些可以通过tryFileResolve或/fs/解决，但这些文件可能还没有
+      // 如果我们处于deps重新处理的中间，则存在
       // resolve pre-bundled deps requests, these could be resolved by
       // tryFileResolve or /fs/ resolution but these files may not yet
       // exists if we are in the middle of a deps re-processing
-      if (asSrc && depsOptimizer?.isOptimizedDepUrl(id)) {
-        const optimizedPath = id.startsWith(FS_PREFIX)
+      if (asSrc && depsOptimizer?.isOptimizedDepUrl(id)) { // 检查当前id是否为优化依赖url
+        const optimizedPath = id.startsWith(FS_PREFIX) // 是的话是否以/fs/开始的
           ? fsPathFromId(id)
           : normalizePath(ensureVolumeInPath(path.resolve(root, id.slice(1))))
         return optimizedPath
       }
 
+      // 确保版本query
       const ensureVersionQuery = (resolved: string): string => {
         if (
           !options.isBuild &&
@@ -176,34 +183,47 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
             resolved === normalizedEnvEntry
           )
         ) {
+          // 确保node_modules的直接导入具有相同的版本query
+          // 就好像它们是通过裸导入导入的一样
+          // 使用原始id进行检查，因为解析后的id可能是真实的符号链接解析后的文件路径
           // Ensure that direct imports of node_modules have the same version query
           // as if they would have been imported through a bare import
           // Use the original id to do the check as the resolved id may be the real
           // file path after symlinks resolution
           const isNodeModule =
+            // /(^|\/)node_modules\//
             nodeModulesInPathRE.test(normalizePath(id)) ||
             nodeModulesInPathRE.test(normalizePath(resolved))
 
           if (isNodeModule && !resolved.match(DEP_VERSION_RE)) {
             const versionHash = depsOptimizer.metadata.browserHash
             if (versionHash && isOptimizable(resolved, depsOptimizer.options)) {
-              resolved = injectQuery(resolved, `v=${versionHash}`)
+              resolved = injectQuery(resolved, `v=${versionHash}`) // 会给解析后的url注入版本hash的query
             }
           }
         }
         return resolved
       }
 
+      // ***
+      // 以 /@fs/* 开头的显式 fs 路径
+      // 直接尝试fs进行解析
+      // ***
       // explicit fs paths that starts with /@fs/*
       if (asSrc && id.startsWith(FS_PREFIX)) {
         const fsPath = fsPathFromId(id)
         res = tryFsResolve(fsPath, options)
         isDebug && debug(`[@fs] ${colors.cyan(id)} -> ${colors.dim(res)}`)
+        // 即使 res 不存在也总是返回这里，因为 /@fs/ 是显式的
+        // 如果文件不存在，它应该是 404
         // always return here even if res doesn't exist since /@fs/ is explicit
         // if the file doesn't exist it should be a 404
         return ensureVersionQuery(res || fsPath)
       }
 
+      // ***
+      // url以/开头的，也是作为尝试fs进行解析
+      // ***
       // URL
       // /foo -> /fs-root/foo
       if (asSrc && id.startsWith('/')) {
@@ -214,6 +234,11 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
         }
       }
 
+      // ***
+      // 相对
+      // 是否为优化依赖文件是则对路径进行序列化之后返回
+      // 之后尝试fs解析
+      // ***
       // relative
       if (
         id.startsWith('.') ||
@@ -221,11 +246,15 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
       ) {
         const basedir = importer ? path.dirname(importer) : process.cwd()
         const fsPath = path.resolve(basedir, id)
+        // 处理相对导入的浏览器字段映射
         // handle browser field mapping for relative imports
 
         const normalizedFsPath = normalizePath(fsPath)
 
+        // 是否为优化依赖文件
         if (depsOptimizer?.isOptimizedDepFile(normalizedFsPath)) {
+          // 磁盘中尚不存在优化文件，请解析为完整路径 
+          // 如果路径没有，则注入当前 browserHash 版本
           // Optimized files could not yet exist in disk, resolve to the full path
           // Inject the current browserHash version if the path doesn't have one
           if (!normalizedFsPath.match(DEP_VERSION_RE)) {
@@ -248,8 +277,9 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
           return res
         }
 
+        // 尝试fs解析
         if ((res = tryFsResolve(fsPath, options))) {
-          res = ensureVersionQuery(res)
+          res = ensureVersionQuery(res) // 确保版本query
           isDebug &&
             debug(`[relative] ${colors.cyan(id)} -> ${colors.dim(res)}`)
           const pkg = importer != null && idToPkgMap.get(importer)
@@ -264,6 +294,10 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
         }
       }
 
+      // ***
+      // windows平台下以/开始也是尝试fs解析
+      // ***
+      // 驱动相对 fs 路径（仅限 Windows）
       // drive relative fs paths (only windows)
       if (isWindows && id.startsWith('/')) {
         const basedir = importer ? path.dirname(importer) : process.cwd()
@@ -275,6 +309,10 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
         }
       }
 
+      // ***
+      // 绝对 fs 路径
+      // 尝试fs解析
+      // ***
       // absolute fs paths
       if (
         isNonDriveRelativeAbsolutePath(id) &&
@@ -284,6 +322,10 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
         return ensureVersionQuery(res)
       }
 
+      // ***
+      // 外部的
+      // 直接返回并标记为外部的
+      // ***
       // external
       if (isExternalUrl(id)) {
         return {
@@ -292,21 +334,31 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
         }
       }
 
+      // 数据url：此插件不处理（这仅在构建期间发生，并且将是由专用插件处理）
       // data uri: pass through (this only happens during build and will be
       // handled by dedicated plugin)
       if (isDataUrl(id)) {
         return null
       }
 
+      // ***
+      // 裸包导入，准备node解析
+      // 先尝试优化解析
+      //   主要是通过优化依赖缓存数据获取到优化后依赖的文件路径也就是node_modules下的.vite/deps/下的打包后的bundle文件的路径
+      //   import * as echarts from 'echarts' -> import * as echarts from '/node_modules/.vite/deps/echarts.js?v=3acf7852'
+      // 再尝试node解析
+      //   主要是通过resolve库进行查找包的package.json文件，之后找到包的入口文件路径返回
+      // ***
       // bare package imports, perform node resolve
       if (bareImportRE.test(id)) {
+        // 此包是否应该外部化
         const external = options.shouldExternalize?.(id)
         if (
           !external &&
           asSrc &&
           depsOptimizer &&
           !options.scan &&
-          (res = await tryOptimizedResolve(depsOptimizer, id, importer))
+          (res = await tryOptimizedResolve(depsOptimizer, id, importer)) // 先尝试优化解析
         ) {
           return res
         }
@@ -326,7 +378,7 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
         }
 
         if (
-          (res = tryNodeResolve(
+          (res = tryNodeResolve( // *** 尝试node解析 ***
             id,
             importer,
             options,
@@ -339,6 +391,8 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
           return res
         }
 
+        // node的内置模块
+        // 如果为 SSR 构建，则外部化，否则重定向到空模块
         // node built-ins.
         // externalize if building for SSR, otherwise redirect to empty module
         if (isBuiltin(id)) {
@@ -368,7 +422,7 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
             }
             return isProduction
               ? browserExternalId
-              : `${browserExternalId}:${id}`
+              : `${browserExternalId}:${id}` // `__vite-browser-external:${id}`
           }
         }
       }
@@ -377,6 +431,7 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
     },
 
     load(id) {
+      // 以__vite-browser-external开头的开发中返回一个代理对象，参考如下
       if (id.startsWith(browserExternalId)) {
         if (isProduction) {
           return `export default {}`
@@ -417,6 +472,7 @@ function splitFileAndPostfix(path: string) {
   return { file, postfix }
 }
 
+// 尝试fs解析
 function tryFsResolve(
   fsPath: string,
   options: InternalResolveOptions,
@@ -518,6 +574,7 @@ function tryFsResolve(
   }
 }
 
+// 尝试解析文件
 function tryResolveFile(
   file: string,
   postfix: string,
@@ -578,6 +635,7 @@ function tryResolveFile(
 
 export const idToPkgMap = new Map<string, PackageData>()
 
+// 尝试node解析
 export function tryNodeResolve(
   id: string,
   importer: string | null | undefined,
@@ -644,8 +702,12 @@ export function tryNodeResolve(
     basedir = nestedResolveFrom(nestedRoot, basedir, preserveSymlinks)
   }
 
-  let pkg: PackageData | undefined
+  let pkg: PackageData | undefined // 包数据
   const pkgId = possiblePkgIds.reverse().find((pkgId) => {
+    // ***
+    // 解析包数据
+    // 使用到了resolve库进行解析查找包的package.json文件，并把json转为对象返回
+    // ***
     pkg = resolvePackageData(pkgId, basedir, preserveSymlinks, packageCache)!
     return pkg
   })!
@@ -678,16 +740,20 @@ export function tryNodeResolve(
     return
   }
 
+  // 解析包入口函数
   let resolveId = resolvePackageEntry
   let unresolvedId = pkgId
   const isDeepImport = unresolvedId !== nestedPath
   if (isDeepImport) {
-    resolveId = resolveDeepImport
+    resolveId = resolveDeepImport // 是否为深度导入 -> 解析深度导入
     unresolvedId = '.' + nestedPath.slice(pkgId.length)
   }
 
   let resolved: string | undefined
   try {
+    // ***
+    // 通过包数据（package.json -> 对象pkg）解析包的入口文件路径是什么
+    // ***
     resolved = resolveId(unresolvedId, pkg, targetWeb, options)
   } catch (err) {
     if (!options.tryEsmOnly) {
@@ -702,7 +768,7 @@ export function tryNodeResolve(
       extensions: DEFAULT_EXTENSIONS
     })
   }
-  if (!resolved) {
+  if (!resolved) { // 没有解析直接返回undefined
     return
   }
 
@@ -813,6 +879,9 @@ export function tryNodeResolve(
   }
 
   if (isBuild) {
+    // ***
+    // 构建时解析包的副作用，以便rollup可以更好执行tree-shaking
+    // ***
     // Resolve package side effects for build so that rollup can better
     // perform tree-shaking
     return {
@@ -820,10 +889,11 @@ export function tryNodeResolve(
       moduleSideEffects: pkg.hasSideEffects(resolved)
     }
   } else {
-    return { id: resolved! }
+    return { id: resolved! } // 直接返回解析后包的入口文件的路径
   }
 }
 
+// 尝试优化解析
 export async function tryOptimizedResolve(
   depsOptimizer: DepsOptimizer,
   id: string,
@@ -833,13 +903,14 @@ export async function tryOptimizedResolve(
   // is used in the preAliasPlugin to decide if an aliased dep is optimized,
   // and avoid replacing the bare import with the resolved path.
   // We should be able to remove this in the future
-  await depsOptimizer.scanProcessing
+  await depsOptimizer.scanProcessing // 等待依赖优化器扫描处理完毕
 
-  const metadata = depsOptimizer.metadata
+  const metadata = depsOptimizer.metadata // 依赖优化器元数据
 
+  // 从id拿到优化依赖信息
   const depInfo = optimizedDepInfoFromId(metadata, id)
   if (depInfo) {
-    return depsOptimizer.getOptimizedDepId(depInfo)
+    return depsOptimizer.getOptimizedDepId(depInfo) // 获取优化依赖id
   }
 
   if (!importer) return
@@ -868,6 +939,7 @@ export async function tryOptimizedResolve(
       }
     }
 
+    // 通过 src 匹配以正确识别 id 是否属于嵌套依赖项
     // match by src to correctly identify if id belongs to nested dependency
     if (optimizedData.src === resolvedSrc) {
       return depsOptimizer.getOptimizedDepId(optimizedData)
@@ -875,6 +947,7 @@ export async function tryOptimizedResolve(
   }
 }
 
+// 解析包的入口
 export function resolvePackageEntry(
   id: string,
   { dir, data, setResolvedCache, getResolvedCache }: PackageData,
@@ -986,7 +1059,7 @@ export function resolvePackageEntry(
             )}`
           )
         setResolvedCache('.', resolvedEntryPoint, targetWeb)
-        return resolvedEntryPoint
+        return resolvedEntryPoint // 返回已解析的入口点
       }
     }
   } catch (e) {
@@ -1094,6 +1167,7 @@ function resolveDeepImport(
   }
 }
 
+// 尝试解析浏览器映射
 function tryResolveBrowserMapping(
   id: string,
   importer: string | undefined,

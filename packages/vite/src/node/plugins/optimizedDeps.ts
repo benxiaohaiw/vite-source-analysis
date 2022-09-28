@@ -17,6 +17,9 @@ export function optimizedDepsPlugin(config: ResolvedConfig): Plugin {
   return {
     name: 'vite:optimized-deps',
 
+    // ***
+    // 主要就是判断id是否为优化依赖文件，是则直接返回id
+    // ***
     async resolveId(id, source, { ssr }) {
       if (getDepsOptimizer(config, ssr)?.isOptimizedDepFile(id)) {
         return id
@@ -45,8 +48,9 @@ export function optimizedDepsPlugin(config: ResolvedConfig): Plugin {
             throwOutdatedRequest(id)
           }
           try {
+            // ***
             // This is an entry point, it may still not be bundled
-            await info.processing
+            await info.processing // *** 等待处理完毕 ***
           } catch {
             // If the refresh has not happened after timeout, Vite considers
             // something unexpected has happened. In this case, Vite
@@ -67,7 +71,8 @@ export function optimizedDepsPlugin(config: ResolvedConfig): Plugin {
         // load hooks to avoid race conditions, once processing is resolved,
         // we are sure that the file has been properly save to disk
         try {
-          return await fs.readFile(file, 'utf-8')
+          // ***
+          return await fs.readFile(file, 'utf-8') // ***直接读取文件***
         } catch (e) {
           // Outdated non-entry points (CHUNK), loaded after a rerun
           throwOutdatedRequest(id)

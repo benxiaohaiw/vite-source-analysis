@@ -549,8 +549,10 @@ export async function createServer(
     )
   }
 
+  // ***
   // 核心
   // 主要转换中间件
+  // ***
   // main transform middleware
   middlewares.use(transformMiddleware(server)) // 核心函数 -> transformMiddleware
 
@@ -572,7 +574,7 @@ export async function createServer(
 
   if (config.appType === 'spa' || config.appType === 'mpa') {
     // transform index.html
-    middlewares.use(indexHtmlMiddleware(server)) // 转换index.html
+    middlewares.use(indexHtmlMiddleware(server)) // *** 转换index.html ***
 
     // handle 404s
     // Keep the named function. The name is visible in debug logs via `DEBUG=connect:dispatcher ...`
@@ -598,9 +600,10 @@ export async function createServer(
     initingServer = (async function () {
       await container.buildStart({}) // 触发插件容器 -> 构建开始阶段
       // ssr ? config.ssr.optimizeDeps : config.optimizeDeps -> disabled属性可控制是否开启
+      // ***
       if (isDepsOptimizerEnabled(config, false)) { // 依赖优化器是否开启
         // non-ssr
-        await initDepsOptimizer(config, server) // 开启则初始化依赖优化器
+        await initDepsOptimizer(config, server) // *** 开启则初始化依赖优化器 ***
       }
       initingServer = undefined
       serverInited = true

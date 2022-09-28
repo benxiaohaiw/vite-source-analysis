@@ -191,7 +191,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
       let exports!: readonly ExportSpecifier[]
       source = stripBomTag(source)
       try {
-        ;[imports, exports] = parseImports(source)
+        ;[imports, exports] = parseImports(source) // es-module-lexer库进行解析code
       } catch (e: any) {
         const isVue = importer.endsWith('.vue')
         const maybeJSX = !isVue && isJSRequest(importer)
@@ -214,12 +214,12 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         )
       }
 
-      const depsOptimizer = getDepsOptimizer(config, ssr)
+      const depsOptimizer = getDepsOptimizer(config, ssr) // 获取依赖优化器
 
       const { moduleGraph } = server
       // since we are already in the transform phase of the importer, it must
       // have been loaded so its entry is guaranteed in the module graph.
-      const importerModule = moduleGraph.getModuleById(importer)!
+      const importerModule = moduleGraph.getModuleById(importer)! // 获取模块图中的导入者模块
       if (!importerModule && depsOptimizer?.isOptimizedDepFile(importer)) {
         // Ids of optimized deps could be invalidated and removed from the graph
         // Return without transforming, this request is no longer valid, a full reload
@@ -228,13 +228,14 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         throwOutdatedRequest(importer)
       }
 
+      // 当前源码中没有使用import语句
       if (!imports.length) {
-        importerModule.isSelfAccepting = false
+        importerModule.isSelfAccepting = false // 给导入者模块设置自身accept为false
         isDebug &&
           debug(
             `${timeFrom(start)} ${colors.dim(`[no imports] ${prettyImporter}`)}`
           )
-        return source
+        return source // 直接返回源代码
       }
 
       let hasHMR = false
@@ -242,7 +243,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
       let hasEnv = false
       let needQueryInjectHelper = false
       let s: MagicString | undefined
-      const str = () => s || (s = new MagicString(source))
+      const str = () => s || (s = new MagicString(source)) // 使用MagicString
       const importedUrls = new Set<string>()
       const staticImportedUrls = new Set<{ url: string; id: string }>()
       const acceptedUrls = new Set<{
@@ -258,6 +259,10 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
       const toAbsoluteUrl = (url: string) =>
         path.posix.resolve(path.posix.dirname(importerModule.url), url)
 
+      // ***
+      // 序列化url
+      // 主要内部逻辑就是再一次执行插件容器的resolveId钩子函数
+      // ***
       const normalizeUrl = async (
         url: string,
         pos: number
@@ -286,6 +291,9 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
           }
         }
 
+        // ***
+        // 执行插件容器的resolveId钩子函数
+        // ***
         const resolved = await this.resolve(url, importerFile)
 
         if (!resolved) {
@@ -316,6 +324,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         ) {
           // an optimized deps may not yet exists in the filesystem, or
           // a regular file exists but is out of root: rewrite to absolute /@fs/ paths
+          // 文件系统中可能尚不存在优化的 deps，或常规文件存在但不在根目录：重写到绝对 /@fs/ 路径
           url = path.posix.join(FS_PREFIX + resolved.id)
         } else {
           url = resolved.id
@@ -332,8 +341,14 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
           url = wrapId(resolved.id)
         }
 
+        // 如果不是SSR，则使URL浏览器有效
         // make the URL browser-valid if not SSR
         if (!ssr) {
+
+          // ***
+          // 用 `?import` 标记非 js/css 导入，例如import xxx from './javascript.svg' -> import xxx from '/javascript.svg?import'
+          // ***
+          
           // mark non-js/css imports with `?import`
           url = markExplicitImport(url)
 
@@ -380,6 +395,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         return [url, resolved.id]
       }
 
+      // 遍历每个导入语句
       for (let index = 0; index < imports.length; index++) {
         const {
           s: start,
@@ -395,13 +411,14 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
 
         const rawUrl = source.slice(start, end)
 
+        // 检查import.meta的用法
         // check import.meta usage
         if (rawUrl === 'import.meta') {
           const prop = source.slice(end, end + 4)
           if (prop === '.hot') {
             hasHMR = true
             if (source.slice(end + 4, end + 11) === '.accept') {
-              // further analyze accepted modules
+              // further analyze accepted modules // 进一步分析接受的模块
               if (source.slice(end + 4, end + 18) === '.acceptExports') {
                 lexAcceptedHmrExports(
                   source,
@@ -425,6 +442,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
           continue
         }
 
+        // 是否有动态导入
         const isDynamicImport = dynamicIndex > -1
 
         // strip import assertions as we can process them ourselves
@@ -432,6 +450,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
           str().remove(end + 1, expEnd)
         }
 
+        // 静态导入或动态导入中的有效字符串，如果可以解决，让我们解决它
         // static import or valid string in dynamic import
         // If resolvable, let's resolve it
         if (specifier) {
@@ -457,6 +476,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
             continue
           }
 
+          // 警告非静态的/public文件的导入
           // warn imports to non-asset /public files
           if (
             specifier.startsWith('/') &&
@@ -471,18 +491,22 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
             )
           }
 
+          // 序列化url
           // normalize
           const [url, resolvedId] = await normalizeUrl(specifier, start)
 
+          // 记录为安全模块
           // record as safe modules
           server?.moduleGraph.safeModulesPath.add(fsPathFromUrl(url))
 
           if (url !== specifier) {
-            let rewriteDone = false
+            let rewriteDone = false // 是否重写完毕
+            // 是否是优化依赖文件
             if (
               depsOptimizer?.isOptimizedDepFile(resolvedId) &&
               !resolvedId.match(optimizedDepChunkRE)
             ) {
+              // 对于已优化的cjs依赖，通过将命名导入重写为const赋值来支持命名导入。
               // for optimized cjs deps, support named imports by rewriting named imports to const assignments.
               // internal optimized chunks don't need es interop and are excluded
 
@@ -490,6 +514,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
               // page reload. We could return a 404 in that case but it is safe to return the request
               const file = cleanUrl(resolvedId) // Remove ?v={hash}
 
+              // 已优化的依赖需要进行互操作
               const needsInterop = await optimizedDepNeedsInterop(
                 depsOptimizer.metadata,
                 file,
@@ -510,7 +535,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
                 }
               } else if (needsInterop) {
                 debug(`${url} needs interop`)
-                interopNamedImports(str(), imports[index], url, index)
+                interopNamedImports(str(), imports[index], url, index) // 对于已优化的cjs依赖，通过将命名导入重写为const赋值来支持命名导入。
                 rewriteDone = true
               }
             }
@@ -524,7 +549,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
               interopNamedImports(str(), imports[index], url, index)
               rewriteDone = true
             }
-            if (!rewriteDone) {
+            if (!rewriteDone) { // 如果没有重写过，那么就把序列化后的url给重写回去
               let rewrittenUrl = JSON.stringify(url)
               if (!isDynamicImport) rewrittenUrl = rewrittenUrl.slice(1, -1)
               str().overwrite(start, end, rewrittenUrl, {
@@ -547,7 +572,11 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
             )
           }
 
+          // 当前导入语句不是动态导入
           if (!isDynamicImport) {
+            // ***
+            // 用于预转换
+            // ***
             // for pre-transforming
             staticImportedUrls.add({ url: hmrUrl, id: resolvedId })
           }
@@ -595,12 +624,14 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         }
       }
 
+      // 有env
       if (hasEnv) {
         // inject import.meta.env
         let env = `import.meta.env = ${JSON.stringify({
           ...config.env,
           SSR: !!ssr
         })};`
+        // 用户的env定义
         // account for user env defines
         for (const key in config.define) {
           if (key.startsWith(`import.meta.env.`)) {
@@ -613,6 +644,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         str().prepend(env)
       }
 
+      // 有hmr
       if (hasHMR && !ssr) {
         debugHmr(
           `${
@@ -625,6 +657,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
               : `[detected api usage]`
           } ${prettyImporter}`
         )
+        // 注入hot上下文
         // inject hot context
         str().prepend(
           `import { createHotContext as __vite__createHotContext } from "${clientPublicPath}";` +
@@ -634,12 +667,14 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         )
       }
 
+      // 需要注入帮助者
       if (needQueryInjectHelper) {
         str().prepend(
           `import { injectQuery as __vite__injectQuery } from "${clientPublicPath}";`
         )
       }
 
+      // 序列化并且重写accepted的urls
       // normalize and rewrite accepted urls
       const normalizedAcceptedUrls = new Set<string>()
       for (const { url, start, end } of acceptedUrls) {
@@ -653,10 +688,12 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         })
       }
 
+      // 更新HMR分析的模块图。节点CSS导入在css插件中进行自己的图更新，所以我们这里只处理js图更新。
       // update the module graph for HMR analysis.
       // node CSS imports does its own graph update in the css plugin so we
       // only handle js graph updates here.
       if (!isCSSRequest(importer)) {
+        // 由pluginContainer.addWatchFile附加
         // attached by pluginContainer.addWatchFile
         const pluginImports = (this as any)._addedImports as
           | Set<string>
@@ -684,6 +721,10 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         ) {
           isSelfAccepting = true
         }
+        
+        // ***
+        // 更新模块图中的模块信息
+        // ***
         const prunedImports = await moduleGraph.updateModuleInfo(
           importerModule,
           importedUrls,
@@ -713,7 +754,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
       if (config.server.preTransformRequests && staticImportedUrls.size) {
         staticImportedUrls.forEach(({ url, id }) => {
           url = removeImportQuery(url)
-          // 主直接执行transformRequest函数，那么在其内部也是直接在当前执行期间向_pendingRequest中存入对应的请求
+          // 主直接执行transformRequest函数，那么在其内部也是直接在当前执行期间向_pendingRequest中缓存入对应的请求
           transformRequest(url, server, { ssr }).catch((e) => {
             if (e?.code === ERR_OUTDATED_OPTIMIZED_DEP) {
               // This are expected errors
@@ -748,6 +789,10 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
   }
 }
 
+// 下面这两个函数所做的事情
+// 对于已优化的cjs依赖，通过将命名导入重写为const赋值来支持命名导入。
+
+// 互操作命名导入
 export function interopNamedImports(
   str: MagicString,
   importSpecifier: ImportSpecifier,

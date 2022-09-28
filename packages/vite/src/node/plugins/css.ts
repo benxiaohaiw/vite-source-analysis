@@ -285,7 +285,7 @@ export function cssPlugin(config: ResolvedConfig): Plugin {
       }
 
       return {
-        code: css,
+        code: css, // 把编译后的css交给后面的后置css插件进行处理成包含css字符串的js代码
         map
       }
     }
@@ -357,7 +357,9 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
         !inlined &&
         dataToEsm(modules, { namedExports: true, preferConst: true })
 
+      // ***
       // 对于开发时转换的最终css代码其实就是一段包含css字符串的js代码
+      // ***
       if (config.command === 'serve') {
         const getContentWithSourcemap = async (content: string) => {
           if (config.css?.devSourcemap) {
@@ -398,6 +400,7 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
         return { code, map: { mappings: '' } } // 直接把最终的代码返回就好
       }
 
+      // build时css的处理
       // build CSS handling ----------------------------------------------------
 
       // record css
@@ -751,15 +754,16 @@ async function compileCSS(
     preprocessorOptions,
     devSourcemap
   } = config.css || {}
-  const isModule = modulesOptions !== false && cssModuleRE.test(id)
+  const isModule = modulesOptions !== false && cssModuleRE.test(id) // 后缀是.module.css等
+  // 虽然在服务时间它可以在不处理的情况下工作，但我们确实需要抓取它们以注册监视依赖项。
   // although at serve time it can work without processing, we do need to
   // crawl them in order to register watch dependencies.
-  const needInlineImport = code.includes('@import')
-  const hasUrl = cssUrlRE.test(code) || cssImageSetRE.test(code)
-  const postcssConfig = await resolvePostcssConfig(config)
-  const lang = id.match(cssLangRE)?.[1] as CssLang | undefined
+  const needInlineImport = code.includes('@import') // 是否需要内联导入
+  const hasUrl = cssUrlRE.test(code) || cssImageSetRE.test(code) // css中是否有url比如background-image等属性的值
+  const postcssConfig = await resolvePostcssConfig(config) // config.css?.postcss选项
+  const lang = id.match(cssLangRE)?.[1] as CssLang | undefined // css所使用的语言
 
-  // 对于纯css来讲不需要进行处理，直接返回css代码就好
+  // 无需处理的纯CSS
   // 1. plain css that needs no processing
   if (
     lang === 'css' &&
@@ -775,10 +779,12 @@ async function compileCSS(
   let modules: Record<string, string> | undefined
   const deps = new Set<string>()
 
+  // 预处理器sass等
   // 2. pre-processors: sass etc.
   if (isPreProcessor(lang)) {
-    const preProcessor = preProcessors[lang]
+    const preProcessor = preProcessors[lang] // 选取对应语言的预处理器函数
     let opts = (preprocessorOptions && preprocessorOptions[lang]) || {}
+    // 默认支持来自节点依赖的@import
     // support @import from node dependencies by default
     switch (lang) {
       case PreprocessLang.scss:
@@ -798,11 +804,13 @@ async function compileCSS(
           ...opts
         }
     }
+    // 重要：将此设置为相对导入解析
     // important: set this for relative import resolving
     opts.filename = cleanUrl(id)
     opts.enableSourcemap = devSourcemap ?? false
 
-    const preprocessResult = await preProcessor(
+    // 预处理器转换后的结果
+    const preprocessResult = await preProcessor( // 使用相应语言的预处理器
       code,
       config.root,
       opts,
@@ -813,6 +821,7 @@ async function compileCSS(
       throw preprocessResult.error
     }
 
+    // 替换转换后的code
     code = preprocessResult.code
     preprocessorMap = combineSourcemapsIfExists(
       opts.filename,
@@ -820,6 +829,7 @@ async function compileCSS(
       preprocessResult.additionalMap
     )
 
+    // 记录由@imports所产生的css依赖
     if (preprocessResult.deps) {
       preprocessResult.deps.forEach((dep) => {
         // sometimes sass registers the file itself as a dep
@@ -837,7 +847,7 @@ async function compileCSS(
 
   if (needInlineImport) {
     postcssPlugins.unshift(
-      (await import('postcss-import')).default({
+      (await import('postcss-import')).default({ // 有对应的postcss插件
         async resolve(id, basedir) {
           const publicFile = checkPublicFile(id, config)
           if (publicFile) {
@@ -861,15 +871,16 @@ async function compileCSS(
     )
   }
   postcssPlugins.push(
-    UrlRewritePostcssPlugin({
+    UrlRewritePostcssPlugin({ // vite内置了一个关于postcss的url重写插件
       replacer: urlReplacer,
       logger: config.logger
     })
   )
 
+  // 后缀是.module.css|less etc
   if (isModule) {
-    postcssPlugins.unshift(
-      (await import('postcss-modules')).default({
+    postcssPlugins.unshift( // 向第一个位置插入
+      (await import('postcss-modules')).default({ // 有对应的postcss插件
         ...modulesOptions,
         getJSON(
           cssFileName: string,
@@ -895,6 +906,7 @@ async function compileCSS(
     )
   }
 
+  // 如果没有postcss插件则直接返回code
   if (!postcssPlugins.length) {
     return {
       code,
@@ -902,11 +914,16 @@ async function compileCSS(
     }
   }
 
+  // vite的package.json中的dependencies里面就有postcss，因为打包的时候它不会打包进去，那么所以当下载vite时就会把postcss也下载下来 ~
+  // 保证postcss库的必定存在性
+  // 那么所以上面的那个UrlRewritePostcssPlugin一定是可以进行工作的，来去保证css文件中的url问题被处理
+
   let postcssResult: PostCSS.Result
   try {
+    // postcss 是一个未捆绑的 dep，应该是惰性导入的
     // postcss is an unbundled dep and should be lazy imported
-    postcssResult = await (await import('postcss'))
-      .default(postcssPlugins)
+    postcssResult = await (await import('postcss')) // 运行postcss
+      .default(postcssPlugins) // 应用postCss的插件
       .process(code, {
         ...postcssOptions,
         to: id,
@@ -926,6 +943,9 @@ async function compileCSS(
           : {})
       })
 
+    // ***
+    // 从 @imports 记录 CSS 依赖项
+    // ***
     // record CSS dependencies from @imports
     for (const message of postcssResult.messages) {
       if (message.type === 'dependency') {
@@ -964,6 +984,7 @@ async function compileCSS(
     throw e
   }
 
+  // 如果配置中没有开启开发时css的sourcemap，则直接返回
   if (!devSourcemap) {
     return {
       ast: postcssResult,
@@ -1408,7 +1429,7 @@ function loadPreprocessor(lang: PreprocessLang, root: string): any {
   }
   try {
     const resolved = requireResolveFromRootWithFallback(root, lang)
-    return (loadedPreprocessors[lang] = _require(resolved))
+    return (loadedPreprocessors[lang] = _require(resolved)) // 动态导入预处理器
   } catch (e) {
     if (e.code === 'MODULE_NOT_FOUND') {
       throw new Error(

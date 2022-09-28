@@ -533,6 +533,9 @@ export async function createPluginContainer(
 
   let closed = false
 
+  // ***
+  // 插件容器
+  // buildStart -> resolveId -> load -> transform
   const container: PluginContainer = {
     options: await (async () => {
       let options = rollupOptions
@@ -561,6 +564,8 @@ export async function createPluginContainer(
       )
     },
 
+    // ***
+    // resolveId是执行到第一个返回结果的钩子函数就结束，然后直接返回结果
     async resolveId(rawId, importer = join(root, 'index.html'), options) {
       const skip = options?.skip
       const ssr = options?.ssr
@@ -606,6 +611,7 @@ export async function createPluginContainer(
             prettifyUrl(id, root)
           )
 
+        // resolveId() 是 hookFirst - 返回第一个非空结果。
         // resolveId() is hookFirst - first non-null result is returned.
         break
       }
@@ -631,6 +637,8 @@ export async function createPluginContainer(
       }
     },
 
+    // ***
+    // load和上面的resolveId同理
     async load(id, options) {
       const ssr = options?.ssr
       const ctx = new Context()
@@ -651,6 +659,8 @@ export async function createPluginContainer(
       return null
     },
 
+    // ***
+    // transform是会把所有插件中的transform钩子函数一一执行一遍，上一个插件返回的结果就是下一个插件所要执行的内容
     async transform(code, id, options) {
       const inMap = options?.inMap
       const ssr = options?.ssr
@@ -695,6 +705,7 @@ export async function createPluginContainer(
           code = result
         }
       }
+      // ***
       // 把经过所有插件的transform钩子函数转换后的最终代码给进行返回即可
       return {
         code,

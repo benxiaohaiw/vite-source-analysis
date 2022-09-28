@@ -77,7 +77,7 @@ export function transformRequest(
         if (!module || pending.timestamp > module.lastInvalidationTimestamp) {
           // The pending request is still valid, we can safely reuse its result
           // 待处理的请求仍然有效，我们可以安全地重用它的结果
-          return pending.request
+          return pending.request // 直接返回这个promise
         } else {
           // Request 1 for module A     (pending.timestamp)
           // Invalidate module A        (module.lastInvalidationTimestamp)
@@ -104,10 +104,11 @@ export function transformRequest(
     }
   }
 
+  // ***
   // 缓存请求并在处理完成后将其清除
   // Cache the request and clear it once processing is done
   server._pendingRequests.set(cacheKey, {
-    request,
+    request, // 执行doTransform函数所返回的promise
     timestamp,
     abort: clearCache
   })
@@ -191,7 +192,9 @@ async function loadAndTransform(
     // like /service-worker.js or /api/users
     if (options.ssr || isFileServingAllowed(file, server)) {
       try {
-        code = await fs.readFile(file, 'utf-8')
+        // ***
+        // ***
+        code = await fs.readFile(file, 'utf-8') // 一旦没有加载结果，那么回退策略就是尝试进行fs读取文件内容直接作为加载的结果
         isDebug && debugLoad(`${timeFrom(loadStart)} [fs] ${prettyUrl}`)
       } catch (e) {
         if (e.code !== 'ENOENT') {

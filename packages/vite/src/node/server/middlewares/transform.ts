@@ -166,6 +166,7 @@ export function transformMiddleware(
         //   import './style.css' -> import '/style.css'
         //   import javascriptLogo from './javascript.svg' -> import javascriptLogo from '/javascript.svg?import' -> /javascript.svg?import -> export default '/javascript.svg'
         //   import { setupCounter } from './counter.js' -> import { setupCounter } from '/counter.js'
+        //   import * as echarts from 'echarts' -> import * as echarts from '/node_modules/.vite/deps/echarts.js?v=3acf7852'
         // style.css
         // ***
 
