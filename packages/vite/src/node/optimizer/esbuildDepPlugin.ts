@@ -108,6 +108,7 @@ export function esbuildDepPlugin(
     }
     return {
       path: path.resolve(resolved)
+      // 没有带命名空间
     }
   }
 
@@ -163,11 +164,12 @@ export function esbuildDepPlugin(
         if (flatId in qualified) {
           return {
             path: flatId,
-            namespace: 'dep'
+            namespace: 'dep' // 入口是会带dep的命名空间
           }
         }
       }
 
+      // 对入口点是依赖包名进行resolve
       build.onResolve(
         { filter: /^[\w@][^:]/ },
         async ({ path: id, importer, kind }) => {
@@ -181,23 +183,32 @@ export function esbuildDepPlugin(
           // ensure esbuild uses our resolved entries
           let entry: { path: string; namespace: string } | undefined
           // if this is an entry, return entry namespace resolve result
-          if (!importer) {
-            if ((entry = resolveEntry(id))) return entry
+          if (!importer) { // 没有导入者说明是入口点
+            if ((entry = resolveEntry(id))) return entry // 带有dep的命名空间
             // check if this is aliased to an entry - also return entry namespace
             const aliased = await _resolve(id, undefined, true)
             if (aliased && (entry = resolveEntry(aliased))) {
-              return entry
+              return entry // 也是带有dep的命名空间
             }
           }
 
+          // 说明有导入者且是包的话那就说明是包的依赖包啦 ~
           // use vite's own resolver
-          const resolved = await resolve(id, importer, kind)
+          const resolved = await resolve(id, importer, kind) // 还是使用vite自已的解析者
           if (resolved) {
-            return resolveResult(id, resolved)
+            return resolveResult(id, resolved) // ***内置包进行浏览器外部化了等一些操作***
+            // **此方法重点看**
+            // 会返回不带dep命名空间的
           }
         }
       )
 
+      // ***
+      // ***
+      // 对于入口文件，我们将自己读取它，并***构造一个代理模块来保留入口的原始id而不是文件路径***，***以便esbuild输出所需的输出文件结构***。
+      // 有必要进行重新导出以将虚拟代理模块从实际模块中分离出来，因为实际模块可能通过相对导入得到引用 - 如果我们不分离代理和实际模块，esbuild将创建相同模块的重复副本！
+      // ***
+      // ***
       // For entry files, we'll read it ourselves and construct a proxy module
       // to retain the entry's raw id instead of file path so that esbuild
       // outputs desired output file structure.
@@ -207,7 +218,8 @@ export function esbuildDepPlugin(
       // the actual module, esbuild will create duplicated copies of the same
       // module!
       const root = path.resolve(config.root)
-      build.onLoad({ filter: /.*/, namespace: 'dep' }, ({ path: id }) => {
+      build.onLoad({ filter: /.*/, namespace: 'dep' }, ({ path: id }) => { // 只有入口返回的才有dep的命名空间，其它的这里并不进行去处理（交给esbuild自己去处理啦 ~）
+        // 原因在上方依赖包的resolve那里的resolveResult里面其余的都是不带有dep命名空间的
         const entryFile = qualified[id]
 
         let relativePath = normalizePath(path.relative(root, entryFile))
@@ -224,6 +236,13 @@ export function esbuildDepPlugin(
         if (!hasImports && !exports.length) {
           // cjs
           contents += `export default require("${relativePath}");`
+          // ***
+          // 在这里可以联想到在main.js中使用element-ui依赖的throttle-debounce包时
+          // throttle-debounce作为入口点依赖最终打包结果是export { xxx as default }
+          // 其中xxx就是require(relativePath)的结果也就是throttle-debounce包入口文件中的module.exports = {}这个结果
+          // 看到这里我们就需要想到vite所做的互操作的原因，因为在使用此依赖包时可能会命名导入{ throttle }这样，但是它默认导出的是module.exports结果
+          // 所以你可以看到vite互操作里面就会进行解构赋值以支持命名导入！
+          // ***
         } else {
           if (exports.includes('default')) {
             contents += `import d from "${relativePath}";export default d;`
@@ -240,6 +259,7 @@ export function esbuildDepPlugin(
         }
       })
 
+      // node的内置模块浏览器是不能加载的，所以就需要做兼容处理
       build.onLoad(
         { filter: /.*/, namespace: 'browser-external' },
         ({ path }) => {

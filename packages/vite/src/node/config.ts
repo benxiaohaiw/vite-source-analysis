@@ -580,6 +580,9 @@ export async function resolveConfig(
             ]
           }))
       }
+      // ***
+      // 创建一个仅有alias、resolve内置插件的插件容器之后进行container.resolveId的解析者函数供使用
+      // ***
       return (
         await container.resolveId(id, importer, { ssr, scan: options?.scan })
       )?.id

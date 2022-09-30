@@ -222,6 +222,7 @@ function areAllImportsAccepted(
   return true
 }
 
+// 传播更新
 function propagateUpdate(
   node: ModuleNode,
   boundaries: Set<{

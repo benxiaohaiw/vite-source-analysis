@@ -535,7 +535,12 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
                 }
               } else if (needsInterop) {
                 debug(`${url} needs interop`)
-                interopNamedImports(str(), imports[index], url, index) // 对于已优化的cjs依赖，通过将命名导入重写为const赋值来支持命名导入。
+                interopNamedImports(str(), imports[index], url, index) // ***对于已优化的cjs依赖，通过将命名导入重写为const赋值来支持命名导入。***
+
+                // ***
+                // 互操作的原因可以看optimizer/index.ts的最后详细解释
+                // ***
+                
                 rewriteDone = true
               }
             }
@@ -818,9 +823,9 @@ export function interopNamedImports(
   } else {
     const exp = source.slice(expStart, expEnd)
     const rawUrl = source.slice(start, end)
-    const rewritten = transformCjsImport(exp, rewrittenUrl, rawUrl, importIndex)
+    const rewritten = transformCjsImport(exp, rewrittenUrl, rawUrl, importIndex) // 转换cjs导入
     if (rewritten) {
-      str.overwrite(expStart, expEnd, rewritten, { contentOnly: true })
+      str.overwrite(expStart, expEnd, rewritten, { contentOnly: true }) // 把原先的导入语句进行重写
     } else {
       // #1439 export * from '...'
       str.overwrite(start, end, rewrittenUrl, { contentOnly: true })
@@ -874,7 +879,7 @@ export function transformCjsImport(
       ) {
         const importedName = spec.imported.name
         const localName = spec.local.name
-        importNames.push({ importedName, localName })
+        importNames.push({ importedName, localName }) // 推入进来
       } else if (spec.type === 'ImportDefaultSpecifier') {
         importNames.push({
           importedName: 'default',
@@ -910,8 +915,8 @@ export function transformCjsImport(
     // importIndex will prevent the cjsModuleName to be duplicate
     const cjsModuleName = makeLegalIdentifier(
       `__vite__cjsImport${importIndex}_${rawUrl}`
-    )
-    const lines: string[] = [`import ${cjsModuleName} from "${url}"`]
+    ) // 制作一个cjs模块名
+    const lines: string[] = [`import ${cjsModuleName} from "${url}"`] // 使用默认导入
     importNames.forEach(({ importedName, localName }) => {
       if (importedName === '*') {
         lines.push(`const ${localName} = ${cjsModuleName}`)
@@ -920,7 +925,7 @@ export function transformCjsImport(
           `const ${localName} = ${cjsModuleName}.__esModule ? ${cjsModuleName}.default : ${cjsModuleName}`
         )
       } else {
-        lines.push(`const ${localName} = ${cjsModuleName}["${importedName}"]`)
+        lines.push(`const ${localName} = ${cjsModuleName}["${importedName}"]`) // 从默认导入中一一进行解构赋值
       }
     })
     if (defaultExports) {
@@ -930,6 +935,6 @@ export function transformCjsImport(
       lines.push(`export { ${exportNames.join(', ')} }`)
     }
 
-    return lines.join('; ')
+    return lines.join('; ') // 形成代码字符串返回就可以啦 ~
   }
 }

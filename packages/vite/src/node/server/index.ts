@@ -309,7 +309,7 @@ export async function createServer(
   const resolvedWatchOptions = resolveChokidarOptions({
     disableGlobbing: true,
     ...serverConfig.watch
-  })
+  }) // 默认了一些参数选项比如ignore **/node_modules/**等
 
   // 使用connect库
   const middlewares = connect() as Connect.Server
@@ -324,7 +324,7 @@ export async function createServer(
 
   // 文件观察者
   const watcher = chokidar.watch(
-    path.resolve(root),
+    path.resolve(root), // 直接把root作为观察的目录，那么在此目录下的文件的增加、删除、变化都会被观察到
     resolvedWatchOptions
   ) as FSWatcher
 
@@ -473,13 +473,14 @@ export async function createServer(
   watcher.on('change', async (file) => {
     file = normalizePath(file)
     if (file.endsWith('/package.json')) {
-      return invalidatePackageData(packageCache, file)
+      return invalidatePackageData(packageCache, file) // 无效包数据
     }
+    // 文件改变时使模块图缓存无效
     // invalidate module graph cache on file change
     moduleGraph.onFileChange(file)
     if (serverConfig.hmr !== false) {
       try {
-        await handleHMRUpdate(file, server)
+        await handleHMRUpdate(file, server) // 处理热模替换更新
       } catch (err) {
         ws.send({
           type: 'error',

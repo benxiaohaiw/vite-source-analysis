@@ -153,7 +153,12 @@ async function doTransform(
   // 加载并转换内容
   const result = loadAndTransform(id, url, server, options, timestamp)
 
-  getDepsOptimizer(config, ssr)?.delayDepsOptimizerUntil(id, () => result)
+  // ***
+  // 重点
+  // ***
+  getDepsOptimizer(config, ssr)?.delayDepsOptimizerUntil(id, () => result) // 延迟依赖优化器直到result这个promise成功态
+  // ***
+  // ***
 
   return result
 }

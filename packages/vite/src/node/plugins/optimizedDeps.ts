@@ -49,8 +49,9 @@ export function optimizedDepsPlugin(config: ResolvedConfig): Plugin {
           }
           try {
             // ***
+            // ***
             // This is an entry point, it may still not be bundled
-            await info.processing // *** 等待处理完毕 ***
+            await info.processing // *** 等待当前要加载的文件是被处理完毕了 ***
           } catch {
             // If the refresh has not happened after timeout, Vite considers
             // something unexpected has happened. In this case, Vite
@@ -72,7 +73,7 @@ export function optimizedDepsPlugin(config: ResolvedConfig): Plugin {
         // we are sure that the file has been properly save to disk
         try {
           // ***
-          return await fs.readFile(file, 'utf-8') // ***直接读取文件***
+          return await fs.readFile(file, 'utf-8') // ***接着这里可以安心的直接读取文件了***
         } catch (e) {
           // Outdated non-entry points (CHUNK), loaded after a rerun
           throwOutdatedRequest(id)

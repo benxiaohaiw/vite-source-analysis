@@ -217,6 +217,7 @@ export interface DepOptimizationMetadata {
 }
 
 /**
+ * 扫描且优化工程中的依赖项
  * Scan and optimize dependencies within a project.
  * Used by Vite CLI when running `vite optimize`.
  */
@@ -239,20 +240,23 @@ export async function optimizeDeps(
     return cachedMetadata
   }
 
+  // 探索工程依赖项 -> 开始扫描导入
   const deps = await discoverProjectDependencies(config)
 
   const depsString = depsLogString(Object.keys(deps))
   log(colors.green(`Optimizing dependencies:\n  ${depsString}`))
 
+  // 增加手动
   await addManuallyIncludedOptimizeDeps(deps, config, ssr)
 
+  // 对依赖项信息进行整合，合法化信息数据
   const depsInfo = toDiscoveredDependencies(config, deps, ssr)
 
-  const result = await runOptimizeDeps(config, depsInfo)
+  const result = await runOptimizeDeps(config, depsInfo) // 开始运行优化依赖
 
   await result.commit()
 
-  return result.metadata
+  return result.metadata // 把新的元数据交出去
 }
 
 export async function optimizeServerSsrDeps(
@@ -322,6 +326,7 @@ export function initDepsOptimizerMetadata(
   }
 }
 
+// 一个map存取，一个数组存取
 export function addOptimizedDepInfo(
   metadata: DepOptimizationMetadata,
   type: 'optimized' | 'discovered' | 'chunks',
@@ -350,8 +355,10 @@ export function loadCachedDepOptimizationMetadata(
     emptyDir(config.cacheDir)
   }
 
+  // 获取依赖缓存目录
   const depsCacheDir = getDepsCacheDir(config, ssr)
 
+  // 不是强制性的
   if (!force) {
     let cachedMetadata: DepOptimizationMetadata | undefined
     try {
@@ -362,29 +369,41 @@ export function loadCachedDepOptimizationMetadata(
       )
     } catch (e) {}
     // hash is consistent, no need to re-bundle
-    if (cachedMetadata && cachedMetadata.hash === getDepHash(config, ssr)) {
+    if (cachedMetadata && cachedMetadata.hash === getDepHash(config, ssr)) { // ***获取依赖的hash（工程的lock文件内容如package-lock.json + vite中一些配置 -> 做一个hash值）***
       log('Hash is consistent. Skipping. Use --force to override.')
       // Nothing to commit or cancel as we are using the cache, we only
       // need to resolve the processing promise so requests can move on
-      return cachedMetadata
+      return cachedMetadata // 没有变化就直接返回缓存元数据
     }
   } else {
     config.logger.info('Forced re-optimization of dependencies')
   }
+
+  // ***
+  // ***是强制性的 或者 hash不一样了都需要进行一个新鲜的缓存返回undefined***
+  // ***
 
   // Start with a fresh cache
   fs.rmSync(depsCacheDir, { recursive: true, force: true })
 }
 
 /**
+ * 探索工程依赖项
  * Initial optimizeDeps at server start. Perform a fast scan using esbuild to
  * find deps to pre-bundle and include user hard-coded dependencies
  */
 export async function discoverProjectDependencies(
   config: ResolvedConfig
 ): Promise<Record<string, string>> {
-  const { deps, missing } = await scanImports(config)
+  const { deps, missing } = await scanImports(config) // ***扫描导入的依赖项***
+  // ***
+  // 这里能够探索到所有的文件中所导入的依赖包（而依赖包是外部化的，所以esbuild不会对其进行分析）
+  // 那么也就是说除了依赖包之外的其它的文件，esbuild都会对其进行分析，以至于我们能够在这里得到所有文件中所依赖的包包 ~
+  // ***
 
+  // ***
+  // 对没有解析到依赖包路径的项目进行提示：可能这些包未安装？原因是由于解析这些包时，没有解析到它们的路径，所以做出的推测就是可能未安装它们？
+  // ***
   const missingIds = Object.keys(missing)
   if (missingIds.length) {
     throw new Error(
@@ -402,6 +421,7 @@ export async function discoverProjectDependencies(
   return deps
 }
 
+// 对依赖项信息进行整合，合法化信息数据
 export function toDiscoveredDependencies(
   config: ResolvedConfig,
   deps: Record<string, string>,
@@ -443,12 +463,13 @@ export function depsLogString(qualifiedIds: string[]): string {
 }
 
 /**
+ * 运行优化依赖
  * Internally, Vite uses this function to prepare a optimizeDeps run. When Vite starts, we can get
  * the metadata and start the server without waiting for the optimizeDeps processing to be completed
  */
 export async function runOptimizeDeps(
   resolvedConfig: ResolvedConfig,
-  depsInfo: Record<string, OptimizedDepInfo>,
+  depsInfo: Record<string, OptimizedDepInfo>, // 所知道的依赖项
   ssr: boolean = resolvedConfig.command === 'build' &&
     !!resolvedConfig.build.ssr
 ): Promise<DepOptimizationResult> {
@@ -475,8 +496,10 @@ export async function runOptimizeDeps(
   writeFile(
     path.resolve(processingCacheDir, 'package.json'),
     JSON.stringify({ type: 'module' })
-  )
+  ) // 写package.json文件
 
+  // ***
+  // ***
   const metadata = initDepsOptimizerMetadata(config, ssr)
 
   metadata.browserHash = getOptimizedBrowserHash(
@@ -488,10 +511,12 @@ export async function runOptimizeDeps(
   // to wait here. Code that needs to access the cached deps needs to await
   // the optimizedDepInfo.processing promise for each dep
 
+  // 把所知道的依赖项的keys取出命名为合格的ids
   const qualifiedIds = Object.keys(depsInfo)
 
   const processingResult: DepOptimizationResult = {
-    metadata,
+    metadata, // 元数据
+    // 提交操作主要就是删除依赖缓存目录，之后把当前正在处理的缓存目录重命名为依赖缓存目录
     async commit() {
       // Write metadata file, delete `deps` folder and rename the `processing` folder to `deps`
       // Processing is done, we can now replace the depsCacheDir with processingCacheDir
@@ -499,11 +524,13 @@ export async function runOptimizeDeps(
       await removeDir(depsCacheDir)
       await renameDir(processingCacheDir, depsCacheDir)
     },
+    // 取消操作就是删除当前正在处理的依赖缓存目录
     cancel() {
       fs.rmSync(processingCacheDir, { recursive: true, force: true })
     }
   }
 
+  // 如果没有所知道的依赖项直接返回
   if (!qualifiedIds.length) {
     return processingResult
   }
@@ -523,19 +550,25 @@ export async function runOptimizeDeps(
   const { plugins: pluginsFromConfig = [], ...esbuildOptions } =
     optimizeDeps?.esbuildOptions ?? {}
 
+  // 按照所知道的依赖项进行遍历
   for (const id in depsInfo) {
     const src = depsInfo[id].src!
+
+    // ***
+    // 这里做了一个提取向外暴露导出数据的操作
+    // ***
     const exportsData = await (depsInfo[id].exportsData ??
       extractExportsData(src, config, ssr))
     if (exportsData.jsxLoader) {
       // Ensure that optimization won't fail by defaulting '.js' to the JSX parser.
       // This is useful for packages such as Gatsby.
+      // 告诉接下里的esbuild
       esbuildOptions.loader = {
         '.js': 'jsx',
         ...esbuildOptions.loader
       }
     }
-    const flatId = flattenId(id)
+    const flatId = flattenId(id) // 展平后的id
     flatIdDeps[flatId] = src
     idToExports[id] = exportsData
     flatIdToExports[flatId] = exportsData
@@ -554,6 +587,7 @@ export async function runOptimizeDeps(
   const platform =
     ssr && config.ssr?.target !== 'webworker' ? 'node' : 'browser'
 
+  // 外部化
   const external = [...(optimizeDeps?.exclude ?? [])]
 
   if (isBuild) {
@@ -576,19 +610,24 @@ export async function runOptimizeDeps(
     }
   }
 
-  const plugins = [...pluginsFromConfig]
+  const plugins = [...pluginsFromConfig] // 配置中的插件
   if (external.length) {
-    plugins.push(esbuildCjsExternalPlugin(external))
+    plugins.push(esbuildCjsExternalPlugin(external)) // 
   }
   plugins.push(
-    esbuildDepPlugin(flatIdDeps, flatIdToExports, external, config, ssr)
+    // **这个插件很重要的**
+    esbuildDepPlugin(flatIdDeps, flatIdToExports, external, config, ssr) // ***使用这个插件的目的
+    // 一方面就是在解析时使用vite自己的解析逻辑，另一方面其造了一个代理模块来去保留入口的原始id而不是文件路径
+    // 当然还做了一个重新导出操作以将虚拟代理模块从实际模块中分离出来，因为实际模块可能通过相对导入得到引用 - 如果我们不分离代理和实际模块，esbuild将创建相同模块的重复副本！
+    // 还有一些浏览器端无法执行的比如node的内置模块需要做一个兼容处理
   )
 
   const start = performance.now()
 
   const result = await build({
     absWorkingDir: process.cwd(),
-    entryPoints: Object.keys(flatIdDeps),
+    // ***依赖包名作为入口点***
+    entryPoints: Object.keys(flatIdDeps), // 入口点就是以这些所知道依赖项为多入口进行最终统一后的构建打包
     bundle: true,
     // We can't use platform 'neutral', as esbuild has custom handling
     // when the platform is 'node' or 'browser' that can't be emulated
@@ -608,10 +647,10 @@ export async function runOptimizeDeps(
     logLevel: 'error',
     splitting: true,
     sourcemap: true,
-    outdir: processingCacheDir,
+    outdir: processingCacheDir, // 输出目录是处理中的缓存目录（也就是以_temp结尾的）
     ignoreAnnotations: !isBuild,
     metafile: true,
-    plugins,
+    plugins, // 本次构建的插件
     ...esbuildOptions,
     supported: {
       'dynamic-import': true,
@@ -628,12 +667,16 @@ export async function runOptimizeDeps(
     processingCacheDir
   )
 
+  // 按照所知道的依赖项进行遍历
   for (const id in depsInfo) {
     const output = esbuildOutputFromId(meta.outputs, id, processingCacheDir)
 
     const { exportsData, ...info } = depsInfo[id]
+    // 增加到已优化选项中
     addOptimizedDepInfo(metadata, 'optimized', {
-      ...info,
+
+      ...info, // 注意processing代表的promise
+
       // We only need to hash the output.imports in to check for stability, but adding the hash
       // and file path gives us a unique hash that may be useful for other things in the future
       fileHash: getHash(
@@ -642,7 +685,7 @@ export async function runOptimizeDeps(
       browserHash: metadata.browserHash,
       // After bundling we have more information and can warn the user about legacy packages
       // that require manual configuration
-      needsInterop: needsInterop(config, ssr, id, idToExports[id], output)
+      needsInterop: needsInterop(config, ssr, id, idToExports[id], output) // ***重点***
     })
   }
 
@@ -653,11 +696,16 @@ export async function runOptimizeDeps(
         .replace(jsExtensionRE, '')
       const file = getOptimizedDepPath(id, resolvedConfig, ssr)
       if (
-        !findOptimizedDepInfoInRecord(
+        // ***
+        // 在元数据中已优化选项中查找当前产生输出的file，没有的那么就是归为chunks一类别的
+        // 原因在于依赖与依赖之间会使用相同的依赖项，那么这些相同的依赖项在被esbuild处理产生对应的提取出来的chunks
+        // ***
+        !findOptimizedDepInfoInRecord( // 在记录中查找优化依赖信息
           metadata.optimized,
           (depInfo) => depInfo.file === file
         )
       ) {
+        // 增加到chunks选项类别中
         addOptimizedDepInfo(metadata, 'chunks', {
           id,
           file,
@@ -669,7 +717,7 @@ export async function runOptimizeDeps(
   }
 
   const dataPath = path.join(processingCacheDir, '_metadata.json')
-  writeFile(dataPath, stringifyDepsOptimizerMetadata(metadata, depsCacheDir))
+  writeFile(dataPath, stringifyDepsOptimizerMetadata(metadata, depsCacheDir)) // 写_metadata.json文件
 
   debug(`deps bundled in ${(performance.now() - start).toFixed(2)}ms`)
 
@@ -685,6 +733,7 @@ export async function findKnownImports(
   return Object.keys(deps)
 }
 
+// 主要就是找到手动包含的依赖项的入口文件路径作为键值对存入当前的deps中来
 export async function addManuallyIncludedOptimizeDeps(
   deps: Record<string, string>,
   config: ResolvedConfig,
@@ -705,6 +754,9 @@ export async function addManuallyIncludedOptimizeDeps(
         )
       }
     }
+    // ***
+    // 创建一个仅有alias、resolve内置插件的插件容器之后进行container.resolveId的解析者函数供使用
+    // ***
     const resolve = config.createResolver({
       asSrc: false,
       scan: true,
@@ -715,11 +767,11 @@ export async function addManuallyIncludedOptimizeDeps(
       // and for pretty printing
       const normalizedId = normalizeId(id)
       if (!deps[normalizedId] && filter?.(normalizedId) !== false) {
-        const entry = await resolve(id, undefined, undefined, ssr)
+        const entry = await resolve(id, undefined, undefined, ssr) // 依赖的入口文件路径
         if (entry) {
           if (isOptimizable(entry, optimizeDeps)) {
             if (!entry.endsWith('?__vite_skip_optimization')) {
-              deps[normalizedId] = entry
+              deps[normalizedId] = entry // 把入口文件路径存入deps中
             }
           } else {
             unableToOptimize(entry, 'Cannot optimize dependency')
@@ -732,6 +784,7 @@ export async function addManuallyIncludedOptimizeDeps(
   }
 }
 
+// 其实就是返回一个新创建的promise和它的内部的resolve函数
 export function newDepOptimizationProcessing(): DepOptimizationProcessing {
   let resolve: () => void
   const promise = new Promise((_resolve) => {
@@ -749,6 +802,12 @@ export function depsFromOptimizedDepInfo(
   )
 }
 
+// ***
+// 获取优化依赖路径
+// 例如dev期间的vue -> /node_modules/.vite/deps/vue.js
+// ***这样就能够说明esbuild能够保证多入口打包之后形成的bundle都是和入口点一一进行对应的。***
+// https://www.yuque.com/lanbitouw/lsud0i/eb30fx
+// ***
 export function getOptimizedDepPath(
   id: string,
   config: ResolvedConfig,
@@ -788,6 +847,7 @@ export function getDepsCacheDirPrefix(config: ResolvedConfig): string {
   return normalizePath(path.resolve(config.cacheDir, 'deps'))
 }
 
+// 是否以依赖缓存目录为前缀例如/node_modules/.vite/deps的
 export function isOptimizedDepFile(
   id: string,
   config: ResolvedConfig
@@ -795,6 +855,7 @@ export function isOptimizedDepFile(
   return id.startsWith(getDepsCacheDirPrefix(config))
 }
 
+// 例如url是否以/node_modules/.vite/deps开头的
 export function createIsOptimizedDepUrl(
   config: ResolvedConfig
 ): (url: string) => boolean {
@@ -1001,13 +1062,35 @@ export async function extractExportsData(
 // a list of modules that pretends to be ESM but still uses `require`.
 // this causes esbuild to wrap them as CJS even when its entry appears to be ESM.
 const KNOWN_INTEROP_IDS = new Set(['moment'])
+// ***
+// 伪装成 ESM 但仍使用 `require` 的一个模块列表。
+// 这会导致 esbuild 将它们包装为 CJS，即使它的入口似乎是 ESM。
+// ***
 
+
+/**
+ * esbuild打包后的结果
+ * 对于依赖间形成的chunk是不需要进行互操作的，原因是它们共打包后结果之间相互引用
+ * 那么对于当前依赖是否需要互操作的意思就是对于依赖是cjs或umd，那么esbuild会把它们包装为cjs形态，但是它们的入口是esm的
+ * 大多情况下会形成一个默认导出，所以当某个文件依赖了此依赖，此时如果不是使用默认导入的话就会报错了
+ * 所以这就需要转换一下，那么vite就把这个称为互操作，也就是vite会改为默认导入，之后使用默认导入进行const解构赋值达到分别导入的效果
+ * 
+ * 这里是描述依赖是否需要互操作的逻辑
+ * 
+ * 而对于转换的逻辑是出现在***importAnalysis插件transform钩子***中进行互操作的（实际上就是检查文件中的导入语句是否为导入的依赖
+ * 之后看这个依赖是否需要进行互操作，再然后就是修改代码啦）
+ * 
+ * 图文参考链接🔗：https://www.yuque.com/lanbitouw/lsud0i/pnb6nx
+ * 
+ */
+
+// 需要互操作
 function needsInterop(
   config: ResolvedConfig,
   ssr: boolean,
   id: string,
-  exportsData: ExportsData,
-  output?: { exports: string[] }
+  exportsData: ExportsData, // 原包入口文件的导出数据
+  output?: { exports: string[] } // esbuild构建后的导出
 ): boolean {
   if (
     getDepOptimizationConfig(config, ssr)?.needsInterop?.includes(id) ||
@@ -1015,7 +1098,9 @@ function needsInterop(
   ) {
     return true
   }
+  // 在原包的入口文件中没有esm语法（包的入口文件不是esbuild打包后的入口文件）
   const { hasImports, exports } = exportsData
+  // 入口没有esm语法 - 像cjs或者umd
   // entry has no ESM syntax - likely CJS or UMD
   if (!exports.length && !hasImports) {
     return true
@@ -1028,9 +1113,9 @@ function needsInterop(
     const generatedExports: string[] = output.exports
 
     if (
-      !generatedExports ||
+      !generatedExports || // 打包后的入口文件没有生成导出数据或者
       (isSingleDefaultExport(generatedExports) &&
-        !isSingleDefaultExport(exports))
+        !isSingleDefaultExport(exports)) // 打包后的入口文件是单个默认导出且原包的入口文件不是单个默认导出
     ) {
       return true
     }
@@ -1044,6 +1129,7 @@ function isSingleDefaultExport(exports: readonly string[]) {
 
 const lockfileFormats = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml']
 
+// 获取依赖的hash（工程的lock文件内容如package-lock.json + vite中一些配置 -> 做一个hash值）
 export function getDepHash(config: ResolvedConfig, ssr: boolean): string {
   let content = lookupFile(config.root, lockfileFormats) || ''
   // also take config into account

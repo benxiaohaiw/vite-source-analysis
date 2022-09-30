@@ -167,7 +167,8 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
       // tryFileResolve or /fs/ resolution but these files may not yet
       // exists if we are in the middle of a deps re-processing
       if (asSrc && depsOptimizer?.isOptimizedDepUrl(id)) { // 检查当前id是否为优化依赖url
-        const optimizedPath = id.startsWith(FS_PREFIX) // 是的话是否以/fs/开始的
+        // /@fs/
+        const optimizedPath = id.startsWith(FS_PREFIX) // 是的话是否以/@fs/开始的
           ? fsPathFromId(id)
           : normalizePath(ensureVolumeInPath(path.resolve(root, id.slice(1))))
         return optimizedPath
@@ -803,6 +804,9 @@ export function tryNodeResolve(
     return { ...resolved, id: resolvedId, external: true }
   }
 
+  // ***
+  // 包入口文件路径 -> 包的package.json对象
+  // ***
   // link id to pkg for browser field mapping check
   idToPkgMap.set(resolved, pkg)
   if ((isBuild && !depsOptimizer) || externalize) {
@@ -814,6 +818,7 @@ export function tryNodeResolve(
     })
   }
 
+  // 取入口文件路径的后缀名
   const ext = path.extname(resolved)
   const isCJS = ext === '.cjs' || (ext === '.js' && pkg.data.type !== 'module')
 
@@ -839,6 +844,7 @@ export function tryNodeResolve(
     include = options.ssrConfig?.optimizeDeps?.exclude
   }
 
+  // 是否跳过优化
   const skipOptimization =
     !isJsType ||
     importer?.includes('node_modules') ||
@@ -872,10 +878,21 @@ export function tryNodeResolve(
       }
     }
   } else {
+
+    // ***
+    // 因为在尝试node解析之前就已经进行了尝试优化解析了，那么所以走到这里时说明有这个包且已优化依赖中没有
+    // 那么就说明此库为丢失的导入，那么便要进行注册丢失的导入（其中进行重新运行一次优化器）
+    // ***
+
+    // ***
+    // 注册丢失的导入
+    // ***
     // this is a missing import, queue optimize-deps re-run and
     // get a resolved its optimized info
     const optimizedInfo = depsOptimizer!.registerMissingImport(id, resolved)
-    resolved = depsOptimizer!.getOptimizedDepId(optimizedInfo)
+    resolved = depsOptimizer!.getOptimizedDepId(optimizedInfo) // ***例如dev期间的vue -> /node_modules/.vite/deps/vue.js***
+    // ***这样就能够说明esbuild能够保证多入口打包之后形成的bundle都是和入口点一一进行对应的。***
+    // https://www.yuque.com/lanbitouw/lsud0i/eb30fx
   }
 
   if (isBuild) {
@@ -886,7 +903,7 @@ export function tryNodeResolve(
     // perform tree-shaking
     return {
       id: resolved,
-      moduleSideEffects: pkg.hasSideEffects(resolved)
+      moduleSideEffects: pkg.hasSideEffects(resolved) // 其实就是包的package.json文件的sideEffects字段，没有的话默认是返回true
     }
   } else {
     return { id: resolved! } // 直接返回解析后包的入口文件的路径

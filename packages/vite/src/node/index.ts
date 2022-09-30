@@ -2,9 +2,9 @@ export * from './config' // 其中的resolveConfig函数
 export { createServer } from './server'
 export { preview } from './preview'
 export { build } from './build'
-export { optimizeDeps } from './optimizer'
+export { optimizeDeps } from './optimizer' // ***重点方法
 export { formatPostcssSourceMap } from './plugins/css'
-export { transformWithEsbuild } from './plugins/esbuild'
+export { transformWithEsbuild } from './plugins/esbuild' // 重点方法
 export { resolvePackageEntry } from './plugins/resolve' // 解析包入口
 export { resolvePackageData } from './packages' // 解析包数据
 export * from './publicUtils'
