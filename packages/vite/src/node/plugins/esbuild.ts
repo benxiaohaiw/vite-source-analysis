@@ -135,7 +135,7 @@ export async function transformWithEsbuild(
   delete resolvedOptions.jsxInject
 
   try {
-    const result = await transform(code, resolvedOptions)
+    const result = await transform(code, resolvedOptions) // esbuild的transfrom函数进行转换
     let map: SourceMap
     if (inMap && resolvedOptions.sourcemap) {
       const nextMap = JSON.parse(result.map)
@@ -198,7 +198,7 @@ export function esbuildPlugin(options: ESBuildOptions = {}): Plugin {
       server = _server
       server.watcher
         .on('add', reloadOnTsconfigChange)
-        .on('change', reloadOnTsconfigChange)
+        .on('change', reloadOnTsconfigChange) // ***监听tsconfig.json文件改变的逻辑***
         .on('unlink', reloadOnTsconfigChange)
     },
     async configResolved(config) {
@@ -209,7 +209,16 @@ export function esbuildPlugin(options: ESBuildOptions = {}): Plugin {
       server = null as any
     },
     async transform(code, id) {
+      /**
+       *  const filter = createFilter(
+            options.include || /\.(m?ts|[jt]sx)$/,
+            options.exclude || /\.js$/
+          )
+       */
       if (filter(id) || filter(cleanUrl(id))) {
+        // ***
+        // 主要是使用esbuild的transform函数进行对代码转换 - js、ts这些进行转换，尤其是ts
+        // ***
         const result = await transformWithEsbuild(code, id, transformOptions)
         if (result.warnings.length) {
           result.warnings.forEach((m) => {

@@ -17,7 +17,7 @@ export function clientInjectionsPlugin(config: ResolvedConfig): Plugin {
     name: 'vite:client-inject',
     async transform(code, id, options) {
       // ***
-      // vite库下的dist/client/client.mjs || dist/client/env.mjs路径
+      // 这个插件主要是针对vite库下的dist/client/client.mjs || dist/client/env.mjs请求的代码内容变量进行动态转换的
       // ***
       if (id === normalizedClientEntry || id === normalizedEnvEntry) {
         const resolvedServerHostname = (
@@ -52,7 +52,7 @@ export function clientInjectionsPlugin(config: ResolvedConfig): Plugin {
         }
 
         // ***
-        // 对vite库下的dist/client/client.mjs || dist/client/env.mjs路径文件中使用到的这些全部做一个替换
+        // 对vite库下的dist/client/client.mjs || dist/client/env.mjs路径文件中使用到的这些变量全部做一个替换
         // ***
         return code
           .replace(`__MODE__`, JSON.stringify(config.mode))

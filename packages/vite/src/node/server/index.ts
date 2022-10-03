@@ -322,10 +322,11 @@ export async function createServer(
     setClientErrorHandler(httpServer, config.logger)
   }
 
-  // 文件观察者
+  // 经过实验发现其是深度观察
+  // 创建一个文件观察者
   const watcher = chokidar.watch(
-    path.resolve(root), // 直接把root作为观察的目录，那么在此目录下的文件的增加、删除、变化都会被观察到
-    resolvedWatchOptions
+    path.resolve(root), // 这里直接就让观察root根目录啦 ~
+    resolvedWatchOptions // 默认了一些参数选项比如ignore **/node_modules/**等
   ) as FSWatcher
 
   // 造一个模块图
@@ -461,23 +462,25 @@ export async function createServer(
   }
 
   const { packageCache } = config
-  const setPackageData = packageCache.set.bind(packageCache)
+  const setPackageData = packageCache.set.bind(packageCache) // 重写了此方法
   packageCache.set = (id, pkg) => {
     if (id.endsWith('.json')) {
-      watcher.add(id)
+      watcher.add(id) // 若是以.json结尾那么增加到watcher中
     }
-    return setPackageData(id, pkg)
+    return setPackageData(id, pkg) // 设置包数据
   }
 
-  // 给文件观察者添加对应文件动作的回调函数
+  // ***
+  // 文件改变事件回调
   watcher.on('change', async (file) => {
     file = normalizePath(file)
     if (file.endsWith('/package.json')) {
-      return invalidatePackageData(packageCache, file) // 无效包数据
+      return invalidatePackageData(packageCache, file) // 直接从packageCache map中删除file对应的键值对
+      // 这里直接返回
     }
     // 文件改变时使模块图缓存无效
     // invalidate module graph cache on file change
-    moduleGraph.onFileChange(file)
+    moduleGraph.onFileChange(file) // 让当前文件路径所对应的多个不同query的模块的transformResult为空等操作
     if (serverConfig.hmr !== false) {
       try {
         await handleHMRUpdate(file, server) // 处理热模替换更新
@@ -490,12 +493,37 @@ export async function createServer(
     }
   })
 
+  /**
+   * 
+   * 要注意：在vite启动后，模块图中是没有任何模块的
+   * 那么它的模块图中的模块节点是在什么时刻添加的呢？
+   * indexHtml plugin -> ensureEntryFromUrl - ensureWatchedFile
+   * transformRequest中的loadAndTransform -> 在load和transform之间ensureEntryFromUrl - ensureWatchedFile
+   * importAnalysis plugin中的normalizeUrl -> ensureEntryFromUrl
+   * 
+   */
+
+  // 经过实验发现其是深度观察
+  // 虽然这里没有监听addDir、unlinkDir事件，但是对于深度嵌套的目录中的文件add、unlink、change都会监听到的
+  // 且在一开始启动监听时，对于所要监听的目录中存在的符合对应事件add、addDir的，那么第一次就会响应的
+  // 也就是说src/main.js -> 启动监听后 -> 在一开始就会触发add事件
+  
+
+  // all
+
+  
+  // 文件增加事件回调
   watcher.on('add', (file) => {
     handleFileAddUnlink(normalizePath(file), server)
   })
+  // addDir
+
+  // 文件删除事件回调
   watcher.on('unlink', (file) => {
     handleFileAddUnlink(normalizePath(file), server)
   })
+  // unlinkDir
+  // ***
 
   if (!middlewareMode && httpServer) {
     httpServer.once('listening', () => {
@@ -511,6 +539,8 @@ export async function createServer(
   }
 
   // Internal middlewares ------------------------------------------------------
+
+  // 下方是中间件的顺序
 
   // request timer
   if (process.env.DEBUG) {
@@ -540,7 +570,11 @@ export async function createServer(
   // open in editor support
   middlewares.use('/__open-in-editor', launchEditorMiddleware())
 
+  // ***
+  // ***
   // 服务在/public下的静态文件
+  // ***
+  // ***
   // serve static files under /public
   // this applies before the transform middleware so that these files are served
   // as-is without transforms.
@@ -556,6 +590,7 @@ export async function createServer(
   // ***
   // main transform middleware
   middlewares.use(transformMiddleware(server)) // 核心函数 -> transformMiddleware
+  // ***
 
   // 服务静态文件中间件
   // serve static files
@@ -576,6 +611,7 @@ export async function createServer(
   if (config.appType === 'spa' || config.appType === 'mpa') {
     // transform index.html
     middlewares.use(indexHtmlMiddleware(server)) // *** 转换index.html ***
+    // ******
 
     // handle 404s
     // Keep the named function. The name is visible in debug logs via `DEBUG=connect:dispatcher ...`

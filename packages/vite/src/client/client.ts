@@ -65,11 +65,15 @@ try {
     }
   }
 
+  // 安装WebSocket
   socket = setupWebSocket(socketProtocol, socketHost, fallback)
 } catch (error) {
   console.error(`[vite] failed to connect to websocket (${error}). `)
 }
 
+// ***
+// 安装WebSocket
+// ***
 function setupWebSocket(
   protocol: string,
   hostAndPath: string,
@@ -88,7 +92,7 @@ function setupWebSocket(
 
   // Listen for messages
   socket.addEventListener('message', async ({ data }) => {
-    handleMessage(JSON.parse(data))
+    handleMessage(JSON.parse(data)) // ***处理消息之前先把data转为对象***
   })
 
   // ping server
@@ -125,9 +129,11 @@ function cleanUrl(pathname: string): string {
   return url.pathname + url.search
 }
 
+// 默认是第一次更新
 let isFirstUpdate = true
-const outdatedLinkTags = new WeakSet<HTMLLinkElement>()
+const outdatedLinkTags = new WeakSet<HTMLLinkElement>() // 过期的link标签
 
+// 处理消息
 async function handleMessage(payload: HMRPayload) {
   switch (payload.type) {
     case 'connected':
@@ -139,7 +145,7 @@ async function handleMessage(payload: HMRPayload) {
         if (socket.readyState === socket.OPEN) {
           socket.send('{"type":"ping"}')
         }
-      }, __HMR_TIMEOUT__)
+      }, __HMR_TIMEOUT__) // 每间隔xxxms都要发送一个ping
       break
     case 'update':
       notifyListeners('vite:beforeUpdate', payload)
@@ -152,12 +158,39 @@ async function handleMessage(payload: HMRPayload) {
         return
       } else {
         clearErrorOverlay()
-        isFirstUpdate = false
+        isFirstUpdate = false // 一旦服务端通知了，就把默认是第一次更新更改为false
       }
+      // ***
+      // 遍历
+      // ***
       payload.updates.forEach((update) => {
+        // 处理每一个更新
         if (update.type === 'js-update') {
-          queueUpdate(fetchUpdate(update))
+          // 其实在js文件中所进行import请求依赖模块的变化更新最终都是js更新 - 主要还是模块mod的type（具体可以看ModuleNode类里面的详细介绍 ~）
+          // 是js更新那么就推入队列更新
+          queueUpdate(fetchUpdate(update)) // 并发的
+          // ***
+          // 真的在遍历更新时大致逻辑是这样的
+          // 发送请求-1 pending then只是存储在身上 结束
+          // 启动队列更新
+          // 微任务队列
+          // [queueUpdate micro task]
+          // 发送请求-2 pending then只是存储在身上 结束
+          // ...
+          // 发送请求-n pending then只是存储在身上 结束
+          // ***当前这个主main代码循环执行完毕之后 - queue已经收集到了所有循环下来的pending promise - 其实实际上是并发的去请求各个要更新的新模块***
+          // 第一个微任务执行完后就会接着给队列中收集到的promise一一添加then，最终等待的是外部的promise，等待它们全部都有了结果以后
+          // 外部的promise就会resolve啦，值就是一一请求的新模块组成的数组，之后直接做一个循环一一执行函数，每个函数中都会去一一执行注册时的回调
+          // 并把新模块作为参数传入进去达到最终想要的更新逻辑 ~
+          // ***
         } else {
+
+          // ***
+          // link标签的css文件的改变会执行到此逻辑中
+          // 主要是对原有link标签做一个clone节点，把新节点href设置为原先的再加上时间戳query（?t=）
+          // 然后把其插入到原有link的后面，当新标签加载事件响应之后再把旧link标签给移除了即可 ~
+          // ***
+
           // css-update
           // this is only sent when a css file referenced with <link> is updated
           const { path, timestamp } = update
@@ -213,10 +246,10 @@ async function handleMessage(payload: HMRPayload) {
         }
         return
       } else {
-        location.reload()
+        location.reload() // 全重新加载直接就是location.reload()
       }
       break
-    case 'prune':
+    case 'prune': // 删除模块的逻辑（是针对于没有incoming connection的mod给其删除掉）
       notifyListeners('vite:beforePrune', payload)
       // After an HMR update, some modules are no longer imported on the page
       // but they may have left behind side effects that need to be cleaned up
@@ -225,7 +258,7 @@ async function handleMessage(payload: HMRPayload) {
       payload.paths.forEach((path) => {
         const fn = pruneMap.get(path)
         if (fn) {
-          fn(dataMap.get(path))
+          fn(dataMap.get(path)) // 一一执行注册时的cb
         }
       })
       break
@@ -248,6 +281,7 @@ async function handleMessage(payload: HMRPayload) {
   }
 }
 
+// 通知监听者
 function notifyListeners<T extends string>(
   event: T,
   data: InferCustomEventPayload<T>
@@ -277,23 +311,26 @@ function hasErrorOverlay() {
   return document.querySelectorAll(overlayId).length
 }
 
+// 默认不是在等待中
 let pending = false
-let queued: Promise<(() => void) | undefined>[] = []
+let queued: Promise<(() => void) | undefined>[] = [] // 队列
 
 /**
  * buffer multiple hot updates triggered by the same src change
  * so that they are invoked in the same order they were sent.
  * (otherwise the order may be inconsistent because of the http request round trip)
  */
-async function queueUpdate(p: Promise<(() => void) | undefined>) {
-  queued.push(p)
-  if (!pending) {
-    pending = true
-    await Promise.resolve()
-    pending = false
-    const loading = [...queued]
-    queued = []
-    ;(await Promise.all(loading)).forEach((fn) => fn && fn())
+async function queueUpdate(p: Promise<(() => void) | undefined>) { // 队列更新
+  queued.push(p) // 推入队列中
+  if (!pending) { // 若没有在等待中
+    pending = true // 则启动队列更新 - 设置为等待中
+    await Promise.resolve() // 先推入一个微任务，其次让当前执行上下文挂起，从栈中移除
+    pending = false // 设置为不在等待中
+    const loading = [...queued] // 浅拷贝
+    queued = [] // 置空
+    // 循环loading数组，给其每一个promise执行then函数，之后返回一个pending/fulfilled的promise，
+    // 对这个promise执行then函数（前者只存在身上，后者推入一个微任务），再者让当前执行上下文挂起，从栈中移除
+    ;(await Promise.all(loading)).forEach((fn) => fn && fn()) // 放入栈顶，执行上下文，恢复执行，遍历，执行fn函数
   }
 }
 
@@ -337,6 +374,7 @@ const sheetsMap = new Map<
   HTMLStyleElement | CSSStyleSheet | undefined
 >()
 
+// 更新style - 主要是创建style标签把样式内容塞进去
 export function updateStyle(id: string, content: string): void {
   let style = sheetsMap.get(id)
   if (supportsConstructedSheet && !content.includes('@import')) {
@@ -374,6 +412,7 @@ export function updateStyle(id: string, content: string): void {
   sheetsMap.set(id, style)
 }
 
+// 删除style - 主要是删除style标签
 export function removeStyle(id: string): void {
   const style = sheetsMap.get(id)
   if (style) {
@@ -389,13 +428,28 @@ export function removeStyle(id: string): void {
   }
 }
 
+// foo mod change -> 向上传播更新 -> main mod 作为边界 - 它里面accept了foo，那么accept的逻辑（函数）肯定是在main mod里面的
+// 所以肯定是按照main mod边界模块进行到map中去查找
+
+// 请求更新
 async function fetchUpdate({
-  path,
-  acceptedPath,
-  timestamp,
-  explicitImportRequired
+  path, // 边界模块的url
+  acceptedPath, // 被接受模块的url - 也就是需要更新的mod的url
+  timestamp, // 时间戳
+  explicitImportRequired // 
 }: Update) {
-  const mod = hotModulesMap.get(path)
+
+  /**
+   * 
+   * import.meta.hot.accept([dep, dep], () => {})
+   * 
+   * hotModulesMap
+   *   边界模块的url=>{ 边界模块的url, [{ deps, callback }] }
+   * 
+   */
+  
+  // 这个热模块信息就是在边界模块中accept时所记录存储的accepted mods=>callback
+  const mod = hotModulesMap.get(path) // 按照边界模块的url到map中去查找热模块信息
   if (!mod) {
     // In a code-splitting project,
     // it is common that the hot-updating module is not loaded yet.
@@ -403,38 +457,56 @@ async function fetchUpdate({
     return
   }
 
+  // ***
+  // 一个缓存新模块的map
+  // ***
   const moduleMap = new Map<string, ModuleNamespace>()
-  const isSelfUpdate = path === acceptedPath
+  const isSelfUpdate = path === acceptedPath // 一样的话就是自身接受
 
+  // hotModulesMap
+  // 边界模块的url=>{ 边界模块的url, [{ deps, callback }] }
+  //                                    过滤出deps中包含当前要更新mod的url的合格的cbs
+
+  // 过滤出合格的cbs
+  // 也就是过滤出和需要更新mod的url相等的callbacks
+
+  // 在重新导入模块之前确定合格的回调
   // determine the qualified callbacks before we re-import the modules
   const qualifiedCallbacks = mod.callbacks.filter(({ deps }) =>
     deps.includes(acceptedPath)
   )
 
+  // 若是自身更新 或 有合格的回调
   if (isSelfUpdate || qualifiedCallbacks.length > 0) {
-    const dep = acceptedPath
+    const dep = acceptedPath // 要更新的模块的url
     const disposer = disposeMap.get(dep)
     if (disposer) await disposer(dataMap.get(dep))
-    const [path, query] = dep.split(`?`)
+    const [path, query] = dep.split(`?`) // 按照?分割前者为path，后者为query
     try {
-      const newMod: ModuleNamespace = await import(
+      // 获取到新的模块
+      const newMod: ModuleNamespace = await import( // 利用import动态进行导入
         /* @vite-ignore */
-        base +
+        base + // base + path.slice(1) + ? + (边界模块类型是js 且 要更新模块的url不是js请求 && 不是css请求 ? import& : '') + t=${timestamp} + (query ? &${query} : '')
           path.slice(1) +
           `?${explicitImportRequired ? 'import&' : ''}t=${timestamp}${
             query ? `&${query}` : ''
           }`
       )
-      moduleMap.set(dep, newMod)
+      moduleMap.set(dep, newMod) // 按照要更新的模块的url=>新的模块
     } catch (e) {
       warnFailedFetch(e, dep)
     }
   }
 
+  // 上面获取到新的模块后 - 下面的逻辑
+
+  // 返回一个函数
   return () => {
+    // 遍历合格的callbacks
     for (const { deps, fn } of qualifiedCallbacks) {
-      fn(deps.map((dep) => moduleMap.get(dep)))
+      fn(deps.map((dep) => moduleMap.get(dep))) // 执行fn函数，参数为按照每次accept接受的依赖项整合新模块缓存map后的值
     }
+    // 日志路径为 -> 是否为自身更新 ? 边界模块的url : 接受依赖模块（需要更新的模块）的url
     const loggedPath = isSelfUpdate ? path : `${acceptedPath} via ${path}`
     console.debug(`[vite] hot updated: ${loggedPath}`)
   }
@@ -460,23 +532,27 @@ interface HotCallback {
 
 type CustomListenersMap = Map<string, ((data: any) => void)[]>
 
-const hotModulesMap = new Map<string, HotModule>()
+const hotModulesMap = new Map<string, HotModule>() // 边界模块的url=>{ 边界模块的url, [{ deps, callback }] }
 const disposeMap = new Map<string, (data: any) => void | Promise<void>>()
-const pruneMap = new Map<string, (data: any) => void | Promise<void>>()
+const pruneMap = new Map<string, (data: any) => void | Promise<void>>() // 边界模块的url=>cb
 const dataMap = new Map<string, any>()
 const customListenersMap: CustomListenersMap = new Map()
 const ctxToListenersMap = new Map<string, CustomListenersMap>()
 
-export function createHotContext(ownerPath: string): ViteHotContext {
+// 创建热上下文
+export function createHotContext(ownerPath: string): ViteHotContext { // ownerPath -> 当前开启热更新模块的url
   if (!dataMap.has(ownerPath)) {
-    dataMap.set(ownerPath, {})
+    dataMap.set(ownerPath, {}) // 做一个存储
   }
 
+  // ***
+  // 当一个文件被热更新时，一个新的上下文被创建，清除它的旧回调
+  // ***
   // when a file is hot updated, a new context is created
   // clear its stale callbacks
   const mod = hotModulesMap.get(ownerPath)
   if (mod) {
-    mod.callbacks = []
+    mod.callbacks = [] // ***
   }
 
   // clear stale custom event listeners
@@ -496,6 +572,7 @@ export function createHotContext(ownerPath: string): ViteHotContext {
   const newListeners: CustomListenersMap = new Map()
   ctxToListenersMap.set(ownerPath, newListeners)
 
+  // 一个函数
   function acceptDeps(deps: string[], callback: HotCallback['fn'] = () => {}) {
     const mod: HotModule = hotModulesMap.get(ownerPath) || {
       id: ownerPath,
@@ -506,21 +583,27 @@ export function createHotContext(ownerPath: string): ViteHotContext {
       fn: callback
     })
     hotModulesMap.set(ownerPath, mod)
+    // 边界模块的url=>{ 边界模块的url, [{ deps, callback }] }
   }
 
+  // hot ctx
   const hot: ViteHotContext = {
     get data() {
       return dataMap.get(ownerPath)
     },
 
+    // ***
+    // 不同参数类型的处理
+    // ***
     accept(deps?: any, callback?: any) {
-      if (typeof deps === 'function' || !deps) {
+      if (typeof deps === 'function' || !deps) { // accept() || accept(() => {}) -> 都是自身更新
         // self-accept: hot.accept(() => {})
         acceptDeps([ownerPath], ([mod]) => deps && deps(mod))
-      } else if (typeof deps === 'string') {
+      } else if (typeof deps === 'string') { // 下面逻辑都是依赖项的接受
+        // 明确的依赖项
         // explicit deps
         acceptDeps([deps], ([mod]) => callback && callback(mod))
-      } else if (Array.isArray(deps)) {
+      } else if (Array.isArray(deps)) { // 
         acceptDeps(deps, callback)
       } else {
         throw new Error(`invalid hot.accept() usage.`)
@@ -537,9 +620,12 @@ export function createHotContext(ownerPath: string): ViteHotContext {
       disposeMap.set(ownerPath, cb)
     },
 
+    // ***
+    // 删除逻辑 - 只传入一个回调
+    // ***
     // @ts-expect-error untyped
     prune(cb: (data: any) => void) {
-      pruneMap.set(ownerPath, cb)
+      pruneMap.set(ownerPath, cb) // 直接按照当前开启热更新模块的url和cb作为键值对
     },
 
     // TODO
@@ -569,18 +655,23 @@ export function createHotContext(ownerPath: string): ViteHotContext {
     }
   }
 
+  // 返回hot ctx
   return hot
 }
 
+// 注入query
 /**
+ * 这里的urls是不能静态分析的动态import()的urls
  * urls here are dynamic import() urls that couldn't be statically analyzed
  */
 export function injectQuery(url: string, queryToInject: string): string {
+  // 跳过不会被vite处理的url
   // skip urls that won't be handled by vite
   if (!url.startsWith('.') && !url.startsWith('/')) {
     return url
   }
 
+  // 不能使用来自URL的pathname，因为它可能是相对的../
   // can't use pathname from URL since it may be relative like ../
   const pathname = url.replace(/#.*$/, '').replace(/\?.*$/, '')
   const { search, hash } = new URL(url, 'http://vitejs.dev')

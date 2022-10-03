@@ -278,7 +278,7 @@ export async function createPluginContainer(
     _activeId: string | null = null
     _activeCode: string | null = null
     _resolveSkips?: Set<Plugin>
-    _addedImports: Set<string> | null = null
+    _addedImports: Set<string> | null = null // *****
 
     constructor(initialPlugin?: Plugin) {
       this._activePlugin = initialPlugin || null
@@ -328,10 +328,36 @@ export async function createPluginContainer(
         : Array.prototype[Symbol.iterator]()
     }
 
+    // 增加观察文件
     addWatchFile(id: string) {
       watchFiles.add(id)
-      ;(this._addedImports || (this._addedImports = new Set())).add(id)
-      if (watcher) ensureWatchedFile(watcher, id, root)
+      ;(this._addedImports || (this._addedImports = new Set())).add(id) // ****
+      if (watcher) ensureWatchedFile(watcher, id, root) // ****
+
+      /**
+       * 
+       * // 确保已观察文件
+       * // utils.ts
+        export function ensureWatchedFile(
+          watcher: FSWatcher,
+          file: string | null,
+          root: string
+        ): void {
+          if (
+            file &&
+            // only need to watch if out of root
+            !file.startsWith(root + '/') &&
+            // some rollup plugins use null bytes for private resolved Ids
+            !file.includes('\0') &&
+            fs.existsSync(file)
+          ) {
+            // resolve file to normalized system path
+            watcher.add(path.resolve(file))
+          }
+        }
+       * 
+       */
+
     }
 
     getWatchFiles() {
@@ -462,6 +488,7 @@ export async function createPluginContainer(
     return err
   }
 
+  // 继承Context
   class TransformContext extends Context {
     filename: string
     originalCode: string
@@ -570,7 +597,7 @@ export async function createPluginContainer(
       const skip = options?.skip
       const ssr = options?.ssr
       const scan = !!options?.scan
-      const ctx = new Context()
+      const ctx = new Context() // 创建一个上下文
       ctx.ssr = !!ssr
       ctx._scan = scan
       ctx._resolveSkips = skip
@@ -641,7 +668,7 @@ export async function createPluginContainer(
     // load和上面的resolveId同理
     async load(id, options) {
       const ssr = options?.ssr
-      const ctx = new Context()
+      const ctx = new Context() // 创建一个上下文
       ctx.ssr = !!ssr
       for (const plugin of getSortedPlugins('load')) {
         if (!plugin.load) continue
@@ -664,7 +691,7 @@ export async function createPluginContainer(
     async transform(code, id, options) {
       const inMap = options?.inMap
       const ssr = options?.ssr
-      const ctx = new TransformContext(id, code, inMap as SourceMap)
+      const ctx = new TransformContext(id, code, inMap as SourceMap) // 创建一个转换上下文
       ctx.ssr = !!ssr
       for (const plugin of getSortedPlugins('transform')) { // 一一应用插件中的transform钩子函数
         if (!plugin.transform) continue
@@ -678,7 +705,7 @@ export async function createPluginContainer(
             ? plugin.transform.handler
             : plugin.transform
         try {
-          result = await handler.call(ctx as any, code, id, { ssr })
+          result = await handler.call(ctx as any, code, id, { ssr }) // ****
         } catch (e) {
           ctx.error(e)
         }

@@ -40,6 +40,10 @@ const sirvOptions = (headers?: OutgoingHttpHeaders): Options => {
   }
 }
 
+// ***
+// 服务public中间件
+// 这个中间件是在transformMiddleware中间的前面
+// ***
 export function servePublicMiddleware(
   dir: string,
   headers?: OutgoingHttpHeaders
@@ -48,14 +52,39 @@ export function servePublicMiddleware(
 
   // Keep the named function. The name is visible in debug logs via `DEBUG=connect:dispatcher ...`
   return function viteServePublicMiddleware(req, res, next) {
+
+    // ***
+    // 跳过带有?import的请求或者是内部请求，那么这些都是需要进行跳过的
+    // ***
+
+    // ***
+    // utils.ts
+    // const importQueryRE = /(\?|&)import=?(?:&|$)/
+    // const internalPrefixes = [
+    //   FS_PREFIX,
+    //   VALID_ID_PREFIX,
+    //   CLIENT_PUBLIC_PATH,
+    //   ENV_PUBLIC_PATH
+    // ]
+    // export const isImportRequest = (url: string): boolean => importQueryRE.test(url)
+    // export const isInternalRequest = (url: string): boolean =>
+    //   InternalPrefixRE.test(url)
+    // ***
+
     // skip import request and internal requests `/@fs/ /@vite-client` etc...
     if (isImportRequest(req.url!) || isInternalRequest(req.url!)) {
       return next()
     }
-    serve(req, res, next)
+    serve(req, res, next) // ***
+    // ***
+    // 在这个函数的逻辑就是如果该请求最终在public目录下找到了资源，那么就直接返回啦，不会向下面的中间件继续进行相应的逻辑了
+    // 那么如果不存在该资源 - 则直接交给下面的中间件进行处理（这里的逻辑和上面的是import query请求或是内部请求是一样的逻辑，也是直接进行next函数的执行）
+    // 所以就来到下面的transformMiddleware中间件里面进行相应的处理
+    // ***
   }
 }
 
+// 服务静态中间件
 export function serveStaticMiddleware(
   dir: string,
   server: ViteDevServer
@@ -117,6 +146,8 @@ export function serveStaticMiddleware(
   }
 }
 
+// 服务原fs中间件
+// 主要是针对于/@fs/开头的请求
 export function serveRawFsMiddleware(
   server: ViteDevServer
 ): Connect.NextHandleFunction {

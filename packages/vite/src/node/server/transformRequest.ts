@@ -145,6 +145,11 @@ async function doTransform(
     return cached
   }
 
+  // ***
+  // url是请求时的url
+  // 而id是插件容器resolveId钩子函数处理后的id
+  // ***
+
   // 解析
   // resolve
   const id =
@@ -241,10 +246,37 @@ async function loadAndTransform(
     }
   }
 
+  // ****
+  // ****
   // 成功加载后确保图中的模块
   // ensure module in graph after successful load
-  const mod = await moduleGraph.ensureEntryFromUrl(url, ssr)
-  ensureWatchedFile(watcher, mod.file, root)
+  const mod = await moduleGraph.ensureEntryFromUrl(url, ssr) // **确保创建此模块节点**
+  // 默认这个模块不是自身接受的
+  // ******
+  ensureWatchedFile(watcher, mod.file, root) // 确保观察此文件
+  /**
+   * 
+   * // 确保已观察文件
+   * // utils.ts
+  export function ensureWatchedFile(
+    watcher: FSWatcher,
+    file: string | null,
+    root: string
+  ): void {
+    if (
+      file &&
+      // only need to watch if out of root
+      !file.startsWith(root + '/') &&
+      // some rollup plugins use null bytes for private resolved Ids
+      !file.includes('\0') &&
+      fs.existsSync(file)
+    ) {
+      // resolve file to normalized system path
+      watcher.add(path.resolve(file))
+    }
+  }
+  * 
+  */
 
   // 转换
   // transform

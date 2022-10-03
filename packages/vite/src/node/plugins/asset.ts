@@ -145,20 +145,28 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
       duplicateAssets.set(config, new Map())
     },
 
+    // ***
+    // 关于资源的resolveId钩子 - 主要是检查id是否在public目录下（会把publi目录 + id做拼接），如果是则直接返回id
+    // ***
     resolveId(id) {
       if (!config.assetsInclude(cleanUrl(id))) {
         return
       }
       // imports to absolute urls pointing to files in /public
       // will fail to resolve in the main resolver. handle them here.
-      const publicFile = checkPublicFile(id, config)
+      const publicFile = checkPublicFile(id, config) // ***检查是否在/public目录下的文件***
       if (publicFile) {
         return id
       }
     },
 
     // ***
-    // /javascript.svg?import -> export default '/javascript.svg'
+    // 因为通过import javascriptLogo from './javascript.svg'早就在importAnalysis插件的transform函数中给其进行转换了，加上了?import这个query
+    // ***
+
+
+    // ***
+    // /javascript.svg?import -> export default '/javascript.svg' // ***
     // ***
     async load(id) {
       if (id.startsWith('\0')) {

@@ -448,6 +448,9 @@ export async function resolveConfig(
   const [prePlugins, normalPlugins, postPlugins] =
     sortUserPlugins(rawUserPlugins)
 
+  // ***
+  // 运行config钩子函数
+  // ***
   // run config hooks
   const userPlugins = [...prePlugins, ...normalPlugins, ...postPlugins]
   config = await runConfigHook(config, userPlugins, configEnv)
@@ -481,16 +484,33 @@ export async function resolveConfig(
     )
   )
 
+  // ***
+  // ***
   const resolveOptions: ResolvedConfig['resolve'] = {
     mainFields: config.resolve?.mainFields ?? DEFAULT_MAIN_FIELDS,
     browserField: config.resolve?.browserField ?? true,
     conditions: config.resolve?.conditions ?? [],
-    extensions: config.resolve?.extensions ?? DEFAULT_EXTENSIONS,
+    extensions: config.resolve?.extensions ?? DEFAULT_EXTENSIONS, // 前者没有则应用后面的默认扩展名
+    /**
+     * constants.ts
+     * export const DEFAULT_EXTENSIONS = [
+        '.mjs',
+        '.js',
+        '.mts',
+        '.ts',
+        '.jsx',
+        '.tsx',
+        '.json'
+      ]
+     */
     dedupe: config.resolve?.dedupe ?? [],
     preserveSymlinks: config.resolve?.preserveSymlinks ?? false,
     alias: resolvedAlias
   }
 
+  // ***
+  // 加载.env文件
+  // ***
   // load .env files
   const envDir = config.envDir
     ? normalizePath(path.resolve(resolvedRoot, config.envDir))
@@ -639,7 +659,8 @@ export async function resolveConfig(
     inlineConfig,
     root: resolvedRoot,
     base: resolvedBase,
-    resolve: resolveOptions,
+    // **在上面**
+    resolve: resolveOptions, // **其中重要的是默认的extentions扩展名**
     publicDir: resolvedPublicDir,
     cacheDir,
     command,
@@ -683,6 +704,7 @@ export async function resolveConfig(
     getSortedPlugins: undefined!,
     getSortedPluginHooks: undefined!
   }
+  // 做一个合并
   const resolved: ResolvedConfig = {
     ...config,
     ...resolvedConfig // 合并

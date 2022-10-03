@@ -55,6 +55,7 @@ export function transformMiddleware(
       return next()
     }
 
+    // 处理下url
     let url: string
     try {
       url = decodeURI(removeTimestampQuery(req.url!)).replace(
@@ -147,6 +148,8 @@ export function transformMiddleware(
         }
       }
 
+      // isJSRequest || isImportRequest || isCSSRequest || isHTMLProxy 符合标准的才进行下面相应的处理
+      // 不符合的直接在下面的next函数的执行调用啦 - 交给下面的中间件进行相应的处理
       if (
         isJSRequest(url) ||
         isImportRequest(url) ||
@@ -183,8 +186,9 @@ export function transformMiddleware(
           isCSSRequest(url) &&
           !isDirectRequest(url) &&
           req.headers.accept?.includes('text/css') // import css请求是没有该请求头的，所以false
+          // 而对于link的css请求的请求头是有accept: text/css,*/*;q=0.1
         ) {
-          url = injectQuery(url, 'direct') // 对于link标签的css请求（正常css请求）需要注入direct
+          url = injectQuery(url, 'direct') // 对于link标签的css请求（正常css请求）需要注入direct query
         }
 
         // 检测是否可以较早的返回304
@@ -202,6 +206,7 @@ export function transformMiddleware(
           return res.end()
         }
 
+        // ****
         // 使用插件容器进行经典三部曲：解析 -> 加载 -> 转换
         // 产生最终的结果
         // resolve, load and transform using the plugin container

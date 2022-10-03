@@ -7,8 +7,9 @@ import { cleanUrl, queryRE } from '../utils'
 export function ensureWatchPlugin(): Plugin {
   return {
     name: 'vite:ensure-watch',
+    // ****
     load(id) {
-      if (queryRE.test(id)) {
+      if (queryRE.test(id)) { // /\?.*$/s
         this.addWatchFile(cleanUrl(id))
       }
       return null

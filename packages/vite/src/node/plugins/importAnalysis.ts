@@ -346,7 +346,9 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         if (!ssr) {
 
           // ***
+          // ***
           // 用 `?import` 标记非 js/css 导入，例如import xxx from './javascript.svg' -> import xxx from '/javascript.svg?import'
+          // ***
           // ***
           
           // mark non-js/css imports with `?import`
@@ -364,7 +366,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
           ) {
             const versionMatch = importer.match(DEP_VERSION_RE)
             if (versionMatch) {
-              url = injectQuery(url, versionMatch[1])
+              url = injectQuery(url, versionMatch[1]) // 注入版本query
             }
           }
 
@@ -372,14 +374,16 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
           // its last updated timestamp to force the browser to fetch the most
           // up-to-date version of this module.
           try {
+            // ****
+            // ****
             // delay setting `isSelfAccepting` until the file is actually used (#7870)
-            const depModule = await moduleGraph.ensureEntryFromUrl(
+            const depModule = await moduleGraph.ensureEntryFromUrl( // **确保创建此模块节点**
               unwrapId(url),
               ssr,
               canSkipImportAnalysis(url)
             )
             if (depModule.lastHMRTimestamp > 0) {
-              url = injectQuery(url, `t=${depModule.lastHMRTimestamp}`)
+              url = injectQuery(url, `t=${depModule.lastHMRTimestamp}`) // 注入?t=
             }
           } catch (e: any) {
             // it's possible that the dep fails to resolve (non-existent import)
@@ -430,8 +434,21 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
                 lexAcceptedHmrDeps(
                   source,
                   source.indexOf('(', end + 11) + 1,
-                  acceptedUrls
+                  acceptedUrls // 这里面保存的是需要接受的模块的字符串分词中的内容
                 )
+                /**
+                 * 
+                 * 对import.meta.hot.accept()的词法分析，分析结果为是否自身被accept
+                 * 
+                 * import.meta.hot.accept()
+                 * import.meta.hot.accept(() => {})
+                 * 以上表示当前模块为自接受模块
+                 * 
+                 * import.meta.hot.accept('', () => {})
+                 * import.meta.hot.accept(['', ''], () => {})
+                 * 以上就表示当前模块不是自接受模块
+                 * 
+                 */
               ) {
                 isSelfAccepting = true
               }
@@ -491,8 +508,10 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
             )
           }
 
+          // ***
           // 序列化url
           // normalize
+          // ***
           const [url, resolvedId] = await normalizeUrl(specifier, start)
 
           // 记录为安全模块
@@ -568,12 +587,16 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
           const hmrUrl = unwrapId(url.replace(base, '/'))
           importedUrls.add(hmrUrl)
 
+          // 开启部分接受 且 importedBindings这个Map是有的
           if (enablePartialAccept && importedBindings) {
             extractImportedBindings(
               resolvedId,
               source,
               imports[index],
-              importedBindings
+              importedBindings // 提取所导入的名字添加到importedBindings这个map中
+              // import * as echarts from 'echarts' -> 'echarts'=>['*']
+              // import Vue from 'vue' -> 'vue'=>['Vue']
+              // import { Button } from 'element-ui' -> 'element-ui'=>['Button']
             )
           }
 
@@ -667,8 +690,8 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         str().prepend(
           `import { createHotContext as __vite__createHotContext } from "${clientPublicPath}";` +
             `import.meta.hot = __vite__createHotContext(${JSON.stringify(
-              importerModule.url
-            )});`
+              importerModule.url // 当前需要被转换内容结果模块的url
+            )});` // 注入这个创建hotContext代码交给import.meta.hot
         )
       }
 
@@ -679,20 +702,23 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         )
       }
 
+      // ****
       // 序列化并且重写accepted的urls
       // normalize and rewrite accepted urls
       const normalizedAcceptedUrls = new Set<string>()
       for (const { url, start, end } of acceptedUrls) {
-        const [normalized] = await moduleGraph.resolveUrl(
+        const [normalized] = await moduleGraph.resolveUrl( // 它里面也是调用的是插件系统的resolveId钩子函数
           toAbsoluteUrl(markExplicitImport(url)),
           ssr
         )
-        normalizedAcceptedUrls.add(normalized)
-        str().overwrite(start, end, JSON.stringify(normalized), {
+        // ****
+        normalizedAcceptedUrls.add(normalized) // 序列化后的accepted url
+        str().overwrite(start, end, JSON.stringify(normalized), { // 重写
           contentOnly: true
         })
       }
 
+      // ****
       // 更新HMR分析的模块图。节点CSS导入在css插件中进行自己的图更新，所以我们这里只处理js图更新。
       // update the module graph for HMR analysis.
       // node CSS imports does its own graph update in the css plugin so we
@@ -700,6 +726,9 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
       if (!isCSSRequest(importer)) {
         // 由pluginContainer.addWatchFile附加
         // attached by pluginContainer.addWatchFile
+        // ****
+        // 当前上下文context中保存的_addedImports，由插件容器addWatchFile附加
+        // ****
         const pluginImports = (this as any)._addedImports as
           | Set<string>
           | undefined
@@ -708,7 +737,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
             await Promise.all(
               [...pluginImports].map((id) => normalizeUrl(id, 0))
             )
-          ).forEach(([url]) => importedUrls.add(url))
+          ).forEach(([url]) => importedUrls.add(url)) // ***importedUrls是一个Set集合，它可以进行实现去重***
         }
         // HMR transforms are no-ops in SSR, so an `accept` call will
         // never be injected. Avoid updating the `isSelfAccepting`
@@ -716,6 +745,7 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         if (ssr && importerModule.isSelfAccepting) {
           isSelfAccepting = true
         }
+        // 在实践中，接受其所有导出的部分接受模块的行为与自接受模块类似
         // a partially accepted module that accepts all its exports
         // behaves like a self-accepted module in practice
         if (
@@ -726,21 +756,39 @@ export function importAnalysisPlugin(config: ResolvedConfig): Plugin {
         ) {
           isSelfAccepting = true
         }
+
+        // ***
+        // bar.js
+        // foo.js
+        //   import './bar'
+        // main.js
+        //   import './foo'
+
+        // 针对foo mod来讲，它的incoming mod -> main mod
+        // 它的outgoing mod -> bar mod
+        // ***
+        
         
         // ***
         // 更新模块图中的模块信息
+        // 返回需要删除的导入模块
+        // ***返回的是不再被导入的模块（备注：是incoming mods一个也没有的这些模块）***
         // ***
         const prunedImports = await moduleGraph.updateModuleInfo(
-          importerModule,
-          importedUrls,
+          importerModule, // 当前模块
+          importedUrls, // 所有导入语句的urls
           importedBindings,
-          normalizedAcceptedUrls,
+          normalizedAcceptedUrls, // 已序列化后的被接受的urls
           isPartiallySelfAccepting ? acceptedExports : null,
-          isSelfAccepting,
+          isSelfAccepting, // 是否自身接受
           ssr
-        )
-        if (hasHMR && prunedImports) {
-          handlePrunedModules(prunedImports, server)
+        ) // ****
+        if (hasHMR && prunedImports) { // 有hmr 且 有需要删除的导入（备注：是incoming mods一个也没有的这些模块）
+          // ****
+          // 处理删除模块
+          // ***需要删除incoming mods一个也没有的这些模块***
+          // ****
+          handlePrunedModules(prunedImports, server) // **重要**
         }
       }
 

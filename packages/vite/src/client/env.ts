@@ -13,6 +13,7 @@ const context = (() => {
   }
 })()
 
+// ***主要是config.define中所定义的然后在clientInjections插件中把__DEFINES__给替换掉了，之后在浏览器端就有这些定义的变量啦 ~***
 // assign defines
 const defines = __DEFINES__
 Object.keys(defines).forEach((key) => {

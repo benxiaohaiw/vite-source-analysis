@@ -586,6 +586,9 @@ export const removeDir = isWindows
     }
 export const renameDir = isWindows ? promisify(gracefulRename) : fs.renameSync
 
+// ***
+// 确保已观察文件
+// ***
 export function ensureWatchedFile(
   watcher: FSWatcher,
   file: string | null,

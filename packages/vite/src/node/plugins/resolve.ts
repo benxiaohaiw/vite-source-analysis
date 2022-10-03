@@ -149,10 +149,10 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
 
       if (importer) {
         if (
-          isTsRequest(importer) ||
+          isTsRequest(importer) || // 是否是ts请求
           resolveOpts.custom?.depScan?.loader?.startsWith('ts')
         ) {
-          options.isFromTsImporter = true
+          options.isFromTsImporter = true // ****
         } else {
           const moduleLang = this.getModuleInfo(importer)?.meta?.vite?.lang
           options.isFromTsImporter = moduleLang && isTsRequest(`.${moduleLang}`)
@@ -174,6 +174,7 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
         return optimizedPath
       }
 
+      // ?v=
       // 确保版本query
       const ensureVersionQuery = (resolved: string): string => {
         if (
@@ -200,6 +201,7 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
             const versionHash = depsOptimizer.metadata.browserHash
             if (versionHash && isOptimizable(resolved, depsOptimizer.options)) {
               resolved = injectQuery(resolved, `v=${versionHash}`) // 会给解析后的url注入版本hash的query
+              // ?v=
             }
           }
         }
@@ -264,7 +266,7 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
               normalizedFsPath
             )?.browserHash
             if (browserHash) {
-              return injectQuery(normalizedFsPath, `v=${browserHash}`)
+              return injectQuery(normalizedFsPath, `v=${browserHash}`) // ?v=
             }
           }
           return normalizedFsPath
@@ -278,7 +280,23 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
           return res
         }
 
+        // ***
         // 尝试fs解析
+        // 会加上options的extentions里面的默认扩展名一一尝试fs解析的
+        // ***
+        /**
+         * constants.ts
+         * export const DEFAULT_EXTENSIONS = [
+          '.mjs',
+          '.js',
+          '.mts',
+          '.ts',
+          '.jsx',
+          '.tsx',
+          '.json'
+          ]
+        */
+
         if ((res = tryFsResolve(fsPath, options))) {
           res = ensureVersionQuery(res) // 确保版本query
           isDebug &&
@@ -359,7 +377,9 @@ export function resolvePlugin(resolveOptions: InternalResolveOptions): Plugin {
           asSrc &&
           depsOptimizer &&
           !options.scan &&
+          // ****
           (res = await tryOptimizedResolve(depsOptimizer, id, importer)) // 先尝试优化解析
+          // ****
         ) {
           return res
         }
@@ -514,6 +534,9 @@ function tryFsResolve(
     return res
   }
 
+  // ***
+  // 默认的扩展名一一尝试解析 - 可以在config.ts、constants.ts中查看默认的扩展名
+  // ***
   for (const ext of options.extensions) {
     if (
       postfix &&
@@ -527,7 +550,7 @@ function tryFsResolve(
         options.skipPackageJson
       ))
     ) {
-      return res
+      return res // 一旦解析成功那么就把解析后结果路径返回
     }
 
     if (
@@ -874,7 +897,7 @@ export function tryNodeResolve(
     if (!isBuild) {
       const versionHash = depsOptimizer!.metadata.browserHash
       if (versionHash && isJsType) {
-        resolved = injectQuery(resolved, `v=${versionHash}`)
+        resolved = injectQuery(resolved, `v=${versionHash}`) // 注入?v=
       }
     }
   } else {
@@ -928,6 +951,10 @@ export async function tryOptimizedResolve(
   const depInfo = optimizedDepInfoFromId(metadata, id)
   if (depInfo) {
     return depsOptimizer.getOptimizedDepId(depInfo) // 获取优化依赖id
+    // 这里就已经带有query啦?v=browserHash
+    // optimizer.ts
+    // getOptimizedDepId: (depInfo: OptimizedDepInfo) =>
+    //   isBuild ? depInfo.file : `${depInfo.file}?v=${depInfo.browserHash}`,
   }
 
   if (!importer) return

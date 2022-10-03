@@ -244,7 +244,7 @@ const devHtmlHook: IndexHtmlTransformHook = async (
             config,
             htmlPath,
             originalUrl
-          )
+          ) // 处理像link标签节点的url
         }
       }
     }
@@ -254,6 +254,7 @@ const devHtmlHook: IndexHtmlTransformHook = async (
     styleUrl.map(async ({ start, end, code }, index) => {
       const url = `${proxyModulePath}?html-proxy&direct&index=${index}.css`
 
+      // **确保创建此模块节点**
       // ensure module in graph after successful load
       const mod = await moduleGraph.ensureEntryFromUrl(url, false) // 确保模块图中有该url对应的mod
       ensureWatchedFile(watcher, mod.file, config.root) // 确保观察此文件，实际上可以认为就是当前的index.html文件

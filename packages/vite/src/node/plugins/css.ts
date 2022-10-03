@@ -214,10 +214,13 @@ export function cssPlugin(config: ResolvedConfig): Plugin {
         return url
       }
 
+      // compileCSS中在第一点对于无需处理的纯CSS来讲直接返回的内容为{ code, map: null }
+      // 以这个最简单的为参考例子
+
       const {
-        code: css,
-        modules,
-        deps,
+        code: css, // 编译后的结果内容
+        modules, // ?
+        deps, // ?
         map
       } = await compileCSS( // 编译css
         id,
@@ -238,17 +241,29 @@ export function cssPlugin(config: ResolvedConfig): Plugin {
         }
       }
 
+      // ***
+      // ***
+      // 在transformRequest.ts中的loadAndTTransform函数中的load和transform之间会去确保模块图中有此模块的
+      // 所以执行到这里的时候，模块图中是有此模块的
+      // ***
+      // ***
+
       // dev
       if (server) {
+        // 服务器唯一逻辑是处理CSS @import依赖的hmr
         // server only logic for handling CSS @import dependency hmr // 需要去处理css中的@import依赖的css的hmr（热模块替换）
         const { moduleGraph } = server
         const thisModule = moduleGraph.getModuleById(id)
         const devBase = config.base
         if (thisModule) {
+          // CSS 模块不能自我接受，因为它导出值
           // CSS modules cannot self-accept since it exports values
           const isSelfAccepting =
             !modules && !inlineRE.test(id) && !htmlProxyRE.test(id)
+            // /(\?|&)inline\b/
+            // /(\?|&)html-proxy\b/
           if (deps) {
+            // 在模块图中记录deps，这样编辑@import CSS可以触发主导入到热更新
             // record deps in the module graph so edits to @import css can trigger
             // main import to hot update
             const depModules = new Set<string | ModuleNode>()
@@ -264,10 +279,12 @@ export function cssPlugin(config: ResolvedConfig): Plugin {
                     )
               )
             }
+            // 更新模块图中的模块信息
             moduleGraph.updateModuleInfo(
               thisModule,
               depModules,
               null,
+              // 根CSS代理模块是自接受的，不应该有一个显式的接受列表
               // The root CSS proxy module is self-accepting and should not
               // have an explicit accept list
               new Set(),
@@ -279,7 +296,7 @@ export function cssPlugin(config: ResolvedConfig): Plugin {
               this.addWatchFile(file)
             }
           } else {
-            thisModule.isSelfAccepting = isSelfAccepting
+            thisModule.isSelfAccepting = isSelfAccepting // 没有deps的那么直接设置是否自身接受结果
           }
         }
       }
@@ -349,6 +366,7 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
       const inlined = inlineRE.test(id)
       const modules = cssModulesCache.get(config)!.get(id)
 
+      // ****
       // #6984, #7552
       // `foo.module.css` => modulesCode
       // `foo.module.css?inline` => cssContent
@@ -370,8 +388,27 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
           return content
         }
 
+        // ***
+        // ***
+        // link发出的css请求头中是会带有accept: text/css,*/*;q=0.1，它对请求头做了判断，有这个的那么就加了direct的query
+        // 那么对于像import './style.css'的请求头是不会有这个的
+        // isDirectCSSRequest表示是css请求 且 带有direct的query（这个是在transform.ts中判断给其进行注入的）
+        // 那么就意味着是link发出的css请求，所以直接把css内容返回即可，不需要下面进行转为js代码字符串
+        // ***
+        // ***同时当该css文件发生改变时在hmr.ts中的逻辑是没有出现死胡同，而是边界和被接受模块都为css模块 ~***
+        // 原因在于上方的css plugin中所修改了这个css模块是自身接受的，所以导致hmr.ts中逻辑的变化
+        // 因为我们在transformRequest.ts中的load和tarnsform之间是会确保模块图中有此模块的，所以说在上方插件中是可以获取到该模块的
+        // 那么又因为不是.module.等，所以直接把其更改为自身接受的
+        // 那么在hmr.ts中就直接把自身模块既当作边界又当作被接受模块，那么这个模块节点的type是css，因为它是css请求且带有direct的，所以为css类型
+        // 那么发给浏览器端执行的时候就会执行到client.ts中的css-type的更新操作
+        // ***
+        // ***
+        // ***
         if (isDirectCSSRequest(id)) {
-          return await getContentWithSourcemap(css)
+          return await getContentWithSourcemap(css) // 会看config.css?.devSourcemap
+          // 如果开了那么就把soucemap注入到css内容里面
+          // 没有开则直接把css内容返回即可啦 ~
+          // ***
         }
         // server only
         if (options?.ssr) {
@@ -393,9 +430,10 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
           // css modules exports change on edit so it can't self accept
           `${
             modulesCode ||
-            `import.meta.hot.accept()\nexport default __vite__css`
+            `import.meta.hot.accept()\nexport default __vite__css` // 向外暴露的是css字符串内容
+            // 自身接受
           }`,
-          `import.meta.hot.prune(() => __vite__removeStyle(__vite__id))`
+          `import.meta.hot.prune(() => __vite__removeStyle(__vite__id))` // 删除逻辑
         ].join('\n')
         return { code, map: { mappings: '' } } // 直接把最终的代码返回就好
       }

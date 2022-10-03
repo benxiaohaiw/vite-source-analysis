@@ -133,7 +133,7 @@ async function createDepsOptimizer(
     isOptimizedDepFile: (id: string) => isOptimizedDepFile(id, config),
     isOptimizedDepUrl: createIsOptimizedDepUrl(config),
     getOptimizedDepId: (depInfo: OptimizedDepInfo) =>
-      isBuild ? depInfo.file : `${depInfo.file}?v=${depInfo.browserHash}`,
+      isBuild ? depInfo.file : `${depInfo.file}?v=${depInfo.browserHash}`, // 带上?v=这样的query
     registerWorkersSource,
     delayDepsOptimizerUntil,
     resetRegisteredIds,

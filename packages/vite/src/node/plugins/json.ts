@@ -62,12 +62,14 @@ export function jsonPlugin(
           }
         }
 
+        // ***
         // 直接使用JSON.parse方法进行解析转为对象
+        // ***
         const parsed = JSON.parse(json)
         return {
           code: dataToEsm(parsed, { // 把此数据转为esm的字符串作为转换后的代码
-            preferConst: true,
-            namedExports: options.namedExports
+            preferConst: true, // 是const这种的
+            namedExports: options.namedExports // 根据配置是否是命名导出
           }),
           map: { mappings: '' }
         }

@@ -73,7 +73,8 @@ export async function resolvePlugins(
     }),
     htmlInlineProxyPlugin(config),
     cssPlugin(config), // css插件（主要是transform内进行编译css代码）
-    config.esbuild !== false ? esbuildPlugin(config.esbuild) : null,
+    // undefined !== false -> true 直接应用这个esbuildPlugin - 它主要可以进行使用esbuild里面的transform函数进行转换代码（主要针对js、**ts**等都是可以的，尤其是ts）
+    config.esbuild !== false ? esbuildPlugin(config.esbuild) : null, // ***
     jsonPlugin( // json插件（主要是tansform钩子将json转为对象）
       {
         namedExports: true, // 默认是命名导出

@@ -22,6 +22,7 @@ export const ESBUILD_MODULES_TARGET = [
   'safari13' // transpile nullish coalescing
 ]
 
+// 默认的扩展名
 export const DEFAULT_EXTENSIONS = [
   '.mjs',
   '.js',

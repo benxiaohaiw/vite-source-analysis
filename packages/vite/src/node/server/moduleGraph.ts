@@ -41,7 +41,21 @@ export class ModuleNode {
    */
   constructor(url: string, setIsSelfAccepting = true) {
     this.url = url
-    this.type = isDirectCSSRequest(url) ? 'css' : 'js'
+    /**
+     * const cssLangs = `\\.(css|less|sass|scss|styl|stylus|pcss|postcss)($|\\?)`
+     * const cssLangRE = new RegExp(cssLangs)
+     * const directRequestRE = /(\?|&)direct\b/
+     * 
+     * export const isDirectCSSRequest = (request: string): boolean =>
+     *   cssLangRE.test(request) && directRequestRE.test(request)
+     * 
+     */
+    this.type = isDirectCSSRequest(url) ? 'css' : 'js' // 模块节点的类型
+    // ***
+    // 在transform.ts中有说明的
+    // url必须是css语言请求 且 请求是要带?direct的才能是css请求，也就是说只有link的请求url的才能是css类型
+    // 其它的一律为js类型
+    // ***
     if (setIsSelfAccepting) {
       this.isSelfAccepting = false
     }
@@ -67,6 +81,10 @@ export type ResolvedUrl = [
 export class ModuleGraph {
   urlToModuleMap = new Map<string, ModuleNode>()
   idToModuleMap = new Map<string, ModuleNode>()
+  // ***
+  // 单个文件可能对应具有不同query的多个模块
+  // 比如vue中就是把一个文件模块分为不同query的多个模块（比如在vue3中一个.vue文件分为xxx.vue mod（实际上被编译为了esm的JS文件内容） xxx.vue?type=css mod）
+  // ***
   // a single file may corresponds to multiple modules with different queries
   fileToModulesMap = new Map<string, Set<ModuleNode>>()
   safeModulesPath = new Set<string>()
@@ -127,40 +145,42 @@ export class ModuleGraph {
     })
   }
 
+  // ****
   /**
    * Update the module graph based on a module's updated imports information
    * If there are dependencies that no longer have any importers, they are
    * returned as a Set.
    */
-  async updateModuleInfo(
-    mod: ModuleNode,
-    importedModules: Set<string | ModuleNode>,
-    importedBindings: Map<string, Set<string>> | null,
-    acceptedModules: Set<string | ModuleNode>,
+  async updateModuleInfo( //更新模块信息
+    mod: ModuleNode, // 要更新的模块
+    importedModules: Set<string | ModuleNode>, // 导入的urls
+    importedBindings: Map<string, Set<string>> | null, // 类似这样一个map { 'vue'=>['Vue'], 'echarts'=>['*'], 'element-ui'=>['Button'] }
+    acceptedModules: Set<string | ModuleNode>, // 被接受的urls
     acceptedExports: Set<string> | null,
-    isSelfAccepting: boolean,
+    isSelfAccepting: boolean, // 是否自身接受
     ssr?: boolean
   ): Promise<Set<ModuleNode> | undefined> {
-    mod.isSelfAccepting = isSelfAccepting
-    const prevImports = mod.importedModules
-    const nextImports = (mod.importedModules = new Set())
+    mod.isSelfAccepting = isSelfAccepting // 修改
+    const prevImports = mod.importedModules // 之前所导入的urls
+    const nextImports = (mod.importedModules = new Set()) // 现在导入的urls
     let noLongerImported: Set<ModuleNode> | undefined
     // update import graph
-    for (const imported of importedModules) {
+    for (const imported of importedModules) { // 分析出来的现在所导入的urls
       const dep =
         typeof imported === 'string'
-          ? await this.ensureEntryFromUrl(imported, ssr)
+          ? await this.ensureEntryFromUrl(imported, ssr) // 创建与之对应的模块节点加入到模块图中
           : imported
+      // 创建双向依赖关系
       dep.importers.add(mod)
       nextImports.add(dep)
     }
     // remove the importer from deps that were imported but no longer are.
-    prevImports.forEach((dep) => {
-      if (!nextImports.has(dep)) {
-        dep.importers.delete(mod)
-        if (!dep.importers.size) {
+    prevImports.forEach((dep) => { // 遍历之前导入的
+      if (!nextImports.has(dep)) { // 在现在导入中没有
+        dep.importers.delete(mod) // 需要把这个依赖删除掉当前这个模块
+        if (!dep.importers.size) { // 如果依赖模块没有导入的了（没有incoming）
           // dependency no longer imported
-          ;(noLongerImported || (noLongerImported = new Set())).add(dep)
+          ;(noLongerImported || (noLongerImported = new Set())).add(dep) // 记录不再被导入的依赖
         }
       }
     })
@@ -169,16 +189,17 @@ export class ModuleGraph {
     for (const accepted of acceptedModules) {
       const dep =
         typeof accepted === 'string'
-          ? await this.ensureEntryFromUrl(accepted, ssr)
+          ? await this.ensureEntryFromUrl(accepted, ssr) // 确保模块节点
           : accepted
-      deps.add(dep)
+      deps.add(dep) // 更新当前模块接受的依赖模块
     }
     // update accepted hmr exports
-    mod.acceptedHmrExports = acceptedExports
-    mod.importedBindings = importedBindings
-    return noLongerImported
+    mod.acceptedHmrExports = acceptedExports // 更新
+    mod.importedBindings = importedBindings // 更新
+    return noLongerImported // 返回不再被导入的模块（备注：incoming mods一个也没有的这些模块）
   }
 
+  // ****
   async ensureEntryFromUrl(
     rawUrl: string,
     ssr?: boolean,
@@ -187,7 +208,7 @@ export class ModuleGraph {
     const [url, resolvedId, meta] = await this.resolveUrl(rawUrl, ssr)
     let mod = this.idToModuleMap.get(resolvedId)
     if (!mod) {
-      mod = new ModuleNode(url, setIsSelfAccepting)
+      mod = new ModuleNode(url, setIsSelfAccepting) // ***创建一个模块节点***
       if (meta) mod.meta = meta
       this.urlToModuleMap.set(url, mod)
       mod.id = resolvedId
@@ -227,19 +248,20 @@ export class ModuleGraph {
       }
     }
 
-    const mod = new ModuleNode(url)
+    const mod = new ModuleNode(url) // 创建一个模块节点
     mod.file = file
     fileMappedModules.add(mod)
     return mod
   }
 
+  // *****
   // for incoming urls, it is important to:
   // 1. remove the HMR timestamp query (?t=xxxx)
   // 2. resolve its extension so that urls with or without extension all map to
   // the same module
   async resolveUrl(url: string, ssr?: boolean): Promise<ResolvedUrl> {
     url = removeImportQuery(removeTimestampQuery(url))
-    const resolved = await this.resolveId(url, !!ssr)
+    const resolved = await this.resolveId(url, !!ssr) // **插件容器中的resolveId钩子函数**
     const resolvedId = resolved?.id || url
     if (
       url !== resolvedId &&
