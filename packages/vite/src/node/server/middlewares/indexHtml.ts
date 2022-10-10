@@ -85,8 +85,9 @@ const processNodeUrl = (
 
   if (moduleGraph) {
     const mod = moduleGraph.urlToModuleMap.get(url)
-    if (mod && mod.lastHMRTimestamp > 0) {
-      url = injectQuery(url, `t=${mod.lastHMRTimestamp}`)
+    if (mod && mod.lastHMRTimestamp > 0) { // 此模块的上次热模替换时间戳是否有值
+      url = injectQuery(url, `t=${mod.lastHMRTimestamp}`) // 一旦有值了之后，那么便给url加上?t=时间戳这样的query
+      // 这就是html文件中url出现?t=这样query的原因所在，就是在这里进行处理的
     }
   }
   const devBase = config.base
@@ -115,7 +116,7 @@ const processNodeUrl = (
       attr.name === 'srcset'
         ? processSrcSetSync(url, ({ url }) => replacer(url))
         : replacer(url)
-    overwriteAttrValue(s, sourceCodeLocation, processedUrl)
+    overwriteAttrValue(s, sourceCodeLocation, processedUrl) // 把url重写进去
   }
 }
 const devHtmlHook: IndexHtmlTransformHook = async (
@@ -205,7 +206,8 @@ const devHtmlHook: IndexHtmlTransformHook = async (
 
       // 如果有src那说明是外部引入，直接处理节点的url就行啦
       if (src) {
-        processNodeUrl(
+        processNodeUrl( // 说明index html文件中script标签的url在热更新后会自动带有?t=一个时间戳这样的query，主要原因就是在这个方法中，它会通过这个url在模块图中找出此模块的lastHMRTimestamp
+        // 上次热模替换时间戳的值，如果有了值之后，那么便一直把这个query注入到url中，然后把url重写到script标签的src这个位置来 ~
           src,
           sourceCodeLocation!,
           s,
