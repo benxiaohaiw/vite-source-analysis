@@ -34,7 +34,7 @@ export function assetImportMetaUrlPlugin(config: ResolvedConfig): Plugin {
         !options?.ssr &&
         id !== preloadHelperId &&
         code.includes('new URL') &&
-        code.includes(`import.meta.url`)
+        code.includes(`import.meta.url`) // 这个是处理代码中必须含有new URL(xxx, import.meta.url)这种的
       ) {
         let s: MagicString | undefined
         const assetImportMetaUrlRE =

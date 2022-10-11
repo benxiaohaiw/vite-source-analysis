@@ -181,6 +181,7 @@ export function cssPlugin(config: ResolvedConfig): Plugin {
     },
 
     buildStart() {
+      // 为每一次构建都确保一个新的缓存
       // Ensure a new cache for every build (i.e. rebuilding in watch mode)
       moduleCache = new Map<string, Record<string, string>>()
       cssModulesCache.set(config, moduleCache)
@@ -348,6 +349,7 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
     name: 'vite:css-post',
 
     buildStart() {
+      // 为每一次构建都确保新的缓存
       // Ensure new caches for every build (i.e. rebuilding in watch mode)
       pureCssChunks = new Set<string>()
       outputToExtractedCSSMap = new Map<NormalizedOutputOptions, string>()
@@ -438,29 +440,43 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
         return { code, map: { mappings: '' } } // 直接把最终的代码返回就好
       }
 
-      // build时css的处理
+      // ***
+      // build时对于css的处理
+      // 主要就是对于在html.ts中的结果进行处理的
+      // ***
       // build CSS handling ----------------------------------------------------
 
       // record css
       // cache css compile result to map
       // and then use the cache replace inline-style-flag when `generateBundle` in vite:build-html plugin
-      const inlineCSS = inlineCSSRE.test(id)
-      const isHTMLProxy = htmlProxyRE.test(id)
+      const inlineCSS = inlineCSSRE.test(id) // 是否内联css
+      const isHTMLProxy = htmlProxyRE.test(id) // 是否是html代理
       const query = parseRequest(id)
-      if (inlineCSS && isHTMLProxy) {
+      /**
+       * 
+       * // html字符串中出现<div style="background-image: url(...)">这种形式的
+        // 和<style>...</style>这种的
+        在html.ts中的这个htmlInlineProxyPlugin中负责resolveId和load的，从而保证能够获取到正确的对应的css代码
+       * 
+       */
+      if (inlineCSS && isHTMLProxy) { // 两者都是的话，直接做一个缓存
+        // 这个方法addToHTMLProxyCache是在html.ts中的，存在那里了
+        // 这存入的是编译后的css的代码
         addToHTMLProxyTransformResult(
           `${getHash(cleanUrl(id))}_${Number.parseInt(query!.index)}`,
           css
         )
-        return `export default ''`
+        return `export default ''` // 返回默认导出空字符串的js代码
       }
+      // const inlineRE = /(\?|&)inline\b/
+      // id不是符合这个正则的
       if (!inlined) {
-        styles.set(id, css)
+        styles.set(id, css) // ***做个存入***
       }
 
       let code: string
-      if (usedRE.test(id)) {
-        if (modulesCode) {
+      if (usedRE.test(id)) { // const usedRE = /(\?|&)used\b/
+        if (modulesCode) { // 是.module.css这种代码
           code = modulesCode
         } else {
           let content = css
@@ -474,12 +490,15 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
         // this will disable tree-shake to work with `import './foo.module.css'` but this usually does not happen
         // this is a limitation of the current approach by `?used` to make tree-shake work
         // See #8936 for more details
-        code = modulesCode || `export default ''`
+        code = modulesCode || `export default ''` // 大部分是后者
       }
 
       return {
-        code,
+        code, // 大部分是export default ''
         map: { mappings: '' },
+        // ***
+        // 避免css模块被摇树，以便我们可以在renderChunk()中检索它
+        // ***
         // avoid the css module from being tree-shaken so that we can retrieve
         // it in renderChunk()
         moduleSideEffects: inlined ? false : 'no-treeshake'
@@ -487,20 +506,21 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
     },
 
     // 下面这两个钩子函数都是build时对rollup进行的操作处理
-    async renderChunk(code, chunk, opts) {
+    async renderChunk(code, chunk, opts) { // 这里的code是每个chunk的预代码，chunk是一个chunk对象，它的最终渲染结果就是当前这个renderChunk钩子函数全部执行后的结果（没有则直接是这里的code）
       let chunkCSS = ''
-      let isPureCssChunk = true
-      const ids = Object.keys(chunk.modules)
-      for (const id of ids) {
+      let isPureCssChunk = true // 当前chunk是否为纯的css块
+      const ids = Object.keys(chunk.modules) // 取出当前chunk中的模块
+      for (const id of ids) { // 遍历
         if (
           !isCSSRequest(id) ||
           cssModuleRE.test(id) ||
           commonjsProxyRE.test(id)
         ) {
+          // 一旦当前chunk中出现这些id，那么表示当前chunk不是纯的css块
           isPureCssChunk = false
         }
         if (styles.has(id)) {
-          chunkCSS += styles.get(id)
+          chunkCSS += styles.get(id) // 之前缓存中有这个模块id，那么获取对应css代码做个拼接
         }
       }
 
@@ -563,12 +583,14 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
         return chunkCSS
       }
 
+      // 确保文件扩展名
       function ensureFileExt(name: string, ext: string) {
         return normalizePath(
           path.format({ ...path.parse(name), base: undefined, ext })
         )
       }
 
+      // 默认是css代码分割的
       if (config.build.cssCodeSplit) {
         if (isPureCssChunk) {
           // this is a shared CSS-only chunk that is empty.
@@ -587,8 +609,11 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
           chunkCSS = resolveAssetUrlsInCss(chunkCSS, cssAssetName)
           chunkCSS = await finalizeCss(chunkCSS, true, config)
 
+          // ***
+          // 发射对应的css文件
           // emit corresponding css file
-          const fileHandle = this.emitFile({
+          const fileHandle = this.emitFile({ // 这个函数主要就是向***bundle对象***中存入要写入的文件对应的信息的
+            // 那么在generatorBundle钩子函数中就能够在参数中获取到啦 ~
             name: isPreProcessor(lang) ? cssAssetName : cssFileName,
             fileName: assetFileNamesToFileName(
               resolveAssetFileNames(config),
@@ -596,10 +621,16 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
               getHash(chunkCSS),
               chunkCSS
             ),
-            type: 'asset',
-            source: chunkCSS
+            type: 'asset', // 资源类型
+            source: chunkCSS // css块代码
           })
-          chunk.viteMetadata.importedCss.add(this.getFileName(fileHandle))
+          // 这个操作之后那么就会在最终生成的文件中出现这个.css文件，内容就是这里的chunkCSS
+          // ***
+          // ***
+          chunk.viteMetadata.importedCss.add(this.getFileName(fileHandle)) // 在当前chunk对象的vite元数据属性中存入对应的信息
+          // ***
+          // 那么这样一来在html.ts中的generatorBundle钩子函数中就能够获取到，然后就可以生成对应的link css标签注入到html文件中去
+          // ***
         } else if (!config.build.ssr) {
           // legacy build and inline css
 
@@ -646,7 +677,7 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
         outputToExtractedCSSMap.set(
           opts,
           (outputToExtractedCSSMap.get(opts) || '') + chunkCSS
-        )
+        ) // 这里存入
       }
       return null
     },
@@ -658,6 +689,7 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
         return
       }
 
+      // 这个和上面的检查chunk是纯css块那里缓存的逻辑是对应关系的
       // remove empty css chunks and their imports
       if (pureCssChunks.size) {
         const emptyChunkFiles = [...pureCssChunks]
@@ -702,12 +734,17 @@ export function cssPostPlugin(config: ResolvedConfig): Plugin {
         })
       }
 
-      let extractedCss = outputToExtractedCSSMap.get(opts)
+      // ------
+
+      // ***
+      // ***
+      let extractedCss = outputToExtractedCSSMap.get(opts) // 这里获取（和上面的逻辑对应的）
       if (extractedCss && !hasEmitted) {
         hasEmitted = true
         extractedCss = await finalizeCss(extractedCss, true, config)
+        // 发射一个叫style.css名字的类型为asset的chunk
         this.emitFile({ // 发射文件
-          name: cssBundleName,
+          name: cssBundleName, // style.css
           type: 'asset',
           source: extractedCss
         })

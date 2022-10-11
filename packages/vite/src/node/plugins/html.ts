@@ -76,10 +76,15 @@ export function htmlInlineProxyPlugin(config: ResolvedConfig): Plugin {
     name: 'vite:html-inline-proxy',
 
     resolveId(id) {
+      // 是否是代理（vite自己做的）
       if (htmlProxyRE.test(id)) {
         return id
       }
     },
+
+    // 这里主要是处理下面这些情况的
+    // html字符串中出现<div style="background-image: url(...)">这种形式的
+    // 和<style>...</style>这种的
 
     load(id) {
       const proxyMatch = id.match(htmlProxyRE)
@@ -87,9 +92,9 @@ export function htmlInlineProxyPlugin(config: ResolvedConfig): Plugin {
         const index = Number(proxyMatch[1])
         const file = cleanUrl(id)
         const url = file.replace(normalizePath(config.root), '')
-        const result = htmlProxyMap.get(config)!.get(url)![index]
+        const result = htmlProxyMap.get(config)!.get(url)![index] // 直接到map中获取结果
         if (result) {
-          return result
+          return result // 返回结果
         } else {
           throw new Error(`No matching HTML proxy module found from ${id}`)
         }
@@ -275,6 +280,9 @@ function handleParseError(
   )
 }
 
+// ***
+// 将index.html编译为一个入口js模块
+// ***
 /**
  * Compiles index.html into an entry js module
  */
@@ -294,14 +302,17 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
   return {
     name: 'vite:build-html',
 
+    // 构建时的transform钩子函数
     async transform(html, id) {
       if (id.endsWith('.html')) {
+        // 相对路径
+        // index.html
         const relativeUrlPath = path.posix.relative(
           config.root,
           normalizePath(id)
         )
-        const publicPath = `/${relativeUrlPath}`
-        const publicBase = getBaseInHTML(relativeUrlPath, config)
+        const publicPath = `/${relativeUrlPath}` // /index.html
+        const publicBase = getBaseInHTML(relativeUrlPath, config) // 获取配置中在html中的公共基础url
 
         const publicToRelative = (filename: string, importer: string) =>
           publicBase + filename
@@ -315,41 +326,48 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
             publicToRelative
           )
 
+        // 应用对html的预转换钩子函数，得到最终的html字符串
         // pre-transform
         html = await applyHtmlTransforms(html, preHooks, {
           path: publicPath,
           filename: id
         })
 
+        // 准备拼接js字符串
         let js = ''
         const s = new MagicString(html)
+        // 资源url数组
         const assetUrls: {
           attr: Token.Attribute
           sourceCodeLocation: Token.Location
         }[] = []
+        // 脚本url数组
         const scriptUrls: ScriptAssetsUrl[] = []
+        // 样式url数组
         const styleUrls: ScriptAssetsUrl[] = []
-        let inlineModuleIndex = -1
+        let inlineModuleIndex = -1 // 内联模块下标
 
+        // 每个script标签都是异步的 - 默认
         let everyScriptIsAsync = true
-        let someScriptsAreAsync = false
-        let someScriptsAreDefer = false
+        let someScriptsAreAsync = false // 一些脚本是异步的
+        let someScriptsAreDefer = false // 一些脚本标签是defer的
 
-        await traverseHtml(html, id, (node) => {
-          if (!nodeIsElement(node)) {
+        // 直接迭代遍历html字符串
+        await traverseHtml(html, id, (node) => { // 对每个节点处理的回调函数
+          if (!nodeIsElement(node)) { // 节点不是元素节点直接返回
             return
           }
 
-          let shouldRemove = false
+          let shouldRemove = false // 是否应该删除
 
           // script tags
-          if (node.nodeName === 'script') {
+          if (node.nodeName === 'script') { // 对于script标签元素的处理
             const { src, sourceCodeLocation, isModule, isAsync } =
-              getScriptInfo(node)
+              getScriptInfo(node) // 获取script标签元素的信息
 
             const url = src && src.value
-            const isPublicFile = !!(url && checkPublicFile(url, config))
-            if (isPublicFile) {
+            const isPublicFile = !!(url && checkPublicFile(url, config)) // src的值是否为public目录下的文件
+            if (isPublicFile) { // 是的话，直接重写带有基础url的
               // referencing public dir url, prefix with base
               overwriteAttrValue(
                 s,
@@ -358,48 +376,50 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
               )
             }
 
+            // 该script标签的type是否为module
             if (isModule) {
-              inlineModuleIndex++
+              inlineModuleIndex++ // 内联模块下标加加
               if (url && !isExcludedUrl(url)) {
                 // <script type="module" src="..."/>
-                // add it as an import
-                js += `\nimport ${JSON.stringify(url)}`
-                shouldRemove = true
-              } else if (node.childNodes.length) {
+                // add it as an import // 作为一个导入添加它
+                js += `\nimport ${JSON.stringify(url)}` // js字符串拼接import导入
+                shouldRemove = true // 标记为应该删除
+              } else if (node.childNodes.length) { // 是<script type="module">...</script>
                 const scriptNode =
                   node.childNodes.pop() as DefaultTreeAdapterMap['textNode']
-                const contents = scriptNode.value
+                const contents = scriptNode.value // 元素节点的内容值
                 // <script type="module">...</script>
                 const filePath = id.replace(normalizePath(config.root), '')
-                addToHTMLProxyCache(config, filePath, inlineModuleIndex, {
+                addToHTMLProxyCache(config, filePath, inlineModuleIndex, { // 添加到html代理缓存中
                   code: contents
                 })
-                js += `\nimport "${id}?html-proxy&index=${inlineModuleIndex}.js"`
-                shouldRemove = true
+                js += `\nimport "${id}?html-proxy&index=${inlineModuleIndex}.js"` // js字符串拼接import导入（带有query的）
+                shouldRemove = true // 标记为应该删除
               }
 
+              // 运算
               everyScriptIsAsync &&= isAsync
               someScriptsAreAsync ||= isAsync
               someScriptsAreDefer ||= !isAsync
-            } else if (url && !isPublicFile) {
-              if (!isExcludedUrl(url)) {
+            } else if (url && !isPublicFile) { // type不是module且src有url且url值不是publc下的文件
+              if (!isExcludedUrl(url)) { // url不是已排除的，则直接进行警告
                 config.logger.warn(
                   `<script src="${url}"> in "${publicPath}" can't be bundled without type="module" attribute`
                 )
               }
-            } else if (node.childNodes.length) {
+            } else if (node.childNodes.length) { // type不是module且src没有值，而script中有内容的
               const scriptNode =
                 node.childNodes.pop() as DefaultTreeAdapterMap['textNode']
               const cleanCode = stripLiteral(scriptNode.value)
 
               let match: RegExpExecArray | null
-              while ((match = inlineImportRE.exec(cleanCode))) {
+              while ((match = inlineImportRE.exec(cleanCode))) { // 直接拿import正则进行匹配导入语句
                 const { 1: url, index } = match
                 const startUrl = cleanCode.indexOf(url, index)
                 const start = startUrl + 1
                 const end = start + url.length - 2
                 const startOffset = scriptNode.sourceCodeLocation!.startOffset
-                scriptUrls.push({
+                scriptUrls.push({ // 匹配到的url整合结果推入到script url数组中来
                   start: start + startOffset,
                   end: end + startOffset,
                   url: scriptNode.value.slice(start, end)
@@ -408,11 +428,26 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
             }
           }
 
+
+          /**
+           *  // this extends the config in @vue/compiler-sfc with <link href>
+              export const assetAttrsConfig: Record<string, string[]> = {
+                link: ['href'],
+                video: ['src', 'poster'],
+                source: ['src', 'srcset'],
+                img: ['src', 'srcset'],
+                image: ['xlink:href', 'href'],
+                use: ['xlink:href', 'href']
+              }
+           */
+
+          // 对于不是script标签元素，查看是否是资源属性配置中的 - link etc
+
           // For asset references in index.html, also generate an import
           // statement for each - this will be handled by the asset plugin
           const assetAttrs = assetAttrsConfig[node.nodeName]
-          if (assetAttrs) {
-            for (const p of node.attrs) {
+          if (assetAttrs) { // 如果是
+            for (const p of node.attrs) { // 直接遍历节点标签的属性
               if (p.value && assetAttrs.includes(p.name)) {
                 const attrSourceCodeLocation =
                   node.sourceCodeLocation!.attrs![p.name]
@@ -429,19 +464,21 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
                   ) {
                     // CSS references, convert to import
                     const importExpression = `\nimport ${JSON.stringify(url)}`
+                    // 收集style url
                     styleUrls.push({
                       url,
                       start: node.sourceCodeLocation!.startOffset,
                       end: node.sourceCodeLocation!.endOffset
                     })
-                    js += importExpression
+                    js += importExpression // link节点的url直接转为import语句拼接在js中
                   } else {
+                    // 资源url中收集结果
                     assetUrls.push({
                       attr: p,
                       sourceCodeLocation: attrSourceCodeLocation
                     })
                   }
-                } else if (checkPublicFile(url, config)) {
+                } else if (checkPublicFile(url, config)) { // 同样检查是否是public下的文件，是则直接重写输出后的路径
                   overwriteAttrValue(
                     s,
                     attrSourceCodeLocation,
@@ -451,29 +488,37 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
               }
             }
           }
+
+          // <div style="background-image: url(...)">这种形式的
+
+          // 节点标签的属性是style且值中有url()值的这种的
+
+          // 提取内联样式作为虚拟CSS，并为标签添加类属性进行选择
           // <tag style="... url(...) ..."></tag>
           // extract inline styles as virtual css and add class attribute to tag for selecting
           const inlineStyle = node.attrs.find(
             (prop) => prop.name === 'style' && prop.value.includes('url(') // only url(...) in css need to emit file
           )
           if (inlineStyle) {
-            inlineModuleIndex++
+            inlineModuleIndex++ // 内联模块下标加加
             // replace `inline style` to class
             // and import css in js code
             const code = inlineStyle.value
             const filePath = id.replace(normalizePath(config.root), '')
-            addToHTMLProxyCache(config, filePath, inlineModuleIndex, { code })
+            addToHTMLProxyCache(config, filePath, inlineModuleIndex, { code }) // 直接style属性的值增加到html代理缓存中
             // will transform with css plugin and cache result with css-post plugin
-            js += `\nimport "${id}?html-proxy&inline-css&index=${inlineModuleIndex}.css"`
+            js += `\nimport "${id}?html-proxy&inline-css&index=${inlineModuleIndex}.css"` // js拼接
             const hash = getHash(cleanUrl(id))
             // will transform in `applyHtmlTransforms`
             const sourceCodeLocation = node.sourceCodeLocation!.attrs!['style']
             overwriteAttrValue(
               s,
               sourceCodeLocation,
-              `__VITE_INLINE_CSS__${hash}_${inlineModuleIndex}__`
+              `__VITE_INLINE_CSS__${hash}_${inlineModuleIndex}__` // 进行重写
             )
           }
+
+          // style标签这种的，且标签内容有值的
 
           // <style>...</style>
           if (node.nodeName === 'style' && node.childNodes.length) {
@@ -481,21 +526,28 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
               node.childNodes.pop() as DefaultTreeAdapterMap['textNode']
             const filePath = id.replace(normalizePath(config.root), '')
             inlineModuleIndex++
-            addToHTMLProxyCache(config, filePath, inlineModuleIndex, {
-              code: styleNode.value
+            addToHTMLProxyCache(config, filePath, inlineModuleIndex, { // 添加到html代理缓存中
+              code: styleNode.value // 直接存入style标签中的内容
             })
-            js += `\nimport "${id}?html-proxy&inline-css&index=${inlineModuleIndex}.css"`
+            // 在css.ts中的插件中会去处理的
+            js += `\nimport "${id}?html-proxy&inline-css&index=${inlineModuleIndex}.css"` // 拼接js导入
             const hash = getHash(cleanUrl(id))
             // will transform in `applyHtmlTransforms`
+            // 将要在applyHtmlTransforms里面进行转换
             s.overwrite(
               styleNode.sourceCodeLocation!.startOffset,
               styleNode.sourceCodeLocation!.endOffset,
               `__VITE_INLINE_CSS__${hash}_${inlineModuleIndex}__`,
               { contentOnly: true }
-            )
+            ) // 还是重写
           }
 
-          if (shouldRemove) {
+          // ***
+          // 当前节点标签是否应该被移除
+          // ***
+          // 移除
+          // ***
+          if (shouldRemove) { // ***此标签是否应该被删除***
             // remove the script tag from the html. we are going to inject new
             // ones in the end.
             s.remove(
@@ -505,8 +557,10 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
           }
         })
 
-        isAsyncScriptMap.get(config)!.set(id, everyScriptIsAsync)
+        // xxx=>false
+        isAsyncScriptMap.get(config)!.set(id, everyScriptIsAsync) // 每个脚本是否都是异步的
 
+        // 警告提示
         if (someScriptsAreAsync && someScriptsAreDefer) {
           config.logger.warn(
             `\nMixed async and defer script modules in ${id}, output script will fallback to defer. Every script, including inline ones, need to be marked as async for your output script to be async.`
@@ -519,9 +573,11 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
         const namedOutput = Object.keys(
           config?.build?.rollupOptions?.input || {}
         )
+
+        // 遍历收集到的资源url数组
         for (const { attr, sourceCodeLocation } of assetUrls) {
           // assetsUrl may be encodeURI
-          const content = decodeURI(attr.value)
+          const content = decodeURI(attr.value) // 解码
           if (
             content !== '' && // Empty attribute
             !namedOutput.includes(content) && // Direct reference to named output
@@ -543,22 +599,24 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
             }
           }
         }
+        // 遍历收集到的script url数组
         // emit <script>import("./aaa")</script> asset
         for (const { start, end, url } of scriptUrls) {
-          if (!isExcludedUrl(url)) {
+          if (!isExcludedUrl(url)) { // 不是已排除中的url
             s.overwrite(
               start,
               end,
               await urlToBuiltUrl(url, id, config, this),
               { contentOnly: true }
             )
-          } else if (checkPublicFile(url, config)) {
+          } else if (checkPublicFile(url, config)) { // 检查是否是public下的文件
             s.overwrite(start, end, toOutputPublicFilePath(url), {
               contentOnly: true
             })
           }
         }
 
+        // 已解析的style的url
         // ignore <link rel="stylesheet"> if its url can't be resolved
         const resolvedStyleUrls = await Promise.all(
           styleUrls.map(async (styleUrl) => ({
@@ -566,34 +624,53 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
             resolved: await this.resolve(styleUrl.url, id)
           }))
         )
+        // 遍历对于已解析的style的url数组
         for (const { start, end, url, resolved } of resolvedStyleUrls) {
+          // 对于解析不了的进行警告在构建时间是不存在的
           if (resolved == null) {
             config.logger.warnOnce(
               `\n${url} doesn't exist at build time, it will remain unchanged to be resolved at runtime`
             )
+            // 直接进行把之前处理的已拼接的js字符串进行替换为空 - 也就是直接从js字符串中移除掉
             const importExpression = `\nimport ${JSON.stringify(url)}`
             js = js.replace(importExpression, '')
           } else {
-            s.remove(start, end)
+            s.remove(start, end) // 对于可以的解析的，那么直接从html字符串中移除掉
           }
         }
 
+        // 在已处理html的map中设置已处理好后的html字符串
         processedHtml.set(id, s.toString())
 
+        // ***
+        // 只在配置和需要时注入模块预加载垫片
+        // ***
         // inject module preload polyfill only when configured and needed
         const { modulePreload } = config.build
         if (
-          (modulePreload === true ||
+          (modulePreload === true || // 默认是true
             (typeof modulePreload === 'object' && modulePreload.polyfill)) &&
-          (someScriptsAreAsync || someScriptsAreDefer)
+          (someScriptsAreAsync || someScriptsAreDefer) // 按照下面情况是false || true
         ) {
-          js = `import "${modulePreloadPolyfillId}";\n${js}`
+          js = `import "${modulePreloadPolyfillId}";\n${js}` // 直接在js字符串的最前方注入导入模块预加载垫片的id，这个是内置的模块预加载垫片
         }
 
-        return js
+        /**
+         * 
+         * 举例：
+         * processedHtml.set(id, s.toString()) // debug
+         * id => '/root/workspace/fe/vite-playground/index.html'
+         * s.toString() => '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta http-equiv="X-UA-Compatible" content="IE=edge">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>Document</title>\n</head>\n<body>\n  <div id="app"></div>\n  \n</body>\n</html>'
+         * 
+         * js => 'import "vite/modulepreload-polyfill";\n\nimport "/main.js"'
+         * 
+         */
+
+        return js // ***把拼接好后的js导入字符串返回，直接交给rollup作为本次transform钩子函数所执行的结果***
       }
     },
 
+    // rollup的生成bundle钩子函数
     async generateBundle(options, bundle) {
       const analyzedChunk: Map<OutputChunk, number> = new Map()
       const getImportedChunks = (
@@ -672,6 +749,7 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
         return tags
       }
 
+      // 直接遍历在transform钩子函数中所缓存的已处理html字符串
       for (const [id, html] of processedHtml) {
         const relativeUrlPath = path.posix.relative(
           config.root,
@@ -696,6 +774,8 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
           }
         }
 
+        // 准备各类资源路径
+
         const toOutputAssetFilePath = (filename: string) =>
           toOutputFilePath(filename, 'asset')
 
@@ -706,39 +786,42 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
 
         let result = html
 
+        // 查找对应的入口chunk
         // find corresponding entry chunk
         const chunk = Object.values(bundle).find(
           (chunk) =>
             chunk.type === 'chunk' &&
-            chunk.isEntry &&
-            chunk.facadeModuleId === id
+            chunk.isEntry && // 哪个chunk是入口
+            chunk.facadeModuleId === id // 且它的id是已处理html字符串的存入的id
         ) as OutputChunk | undefined
 
-        let canInlineEntry = false
+        let canInlineEntry = false // 是否可以内联入口
 
+        // 注入chunk资源link
         // inject chunk asset links
         if (chunk) {
           // an entry chunk can be inlined if
           //  - it's an ES module (e.g. not generated by the legacy plugin)
           //  - it contains no meaningful code other than import statements
-          if (options.format === 'es' && isEntirelyImport(chunk.code)) {
+          if (options.format === 'es' && isEntirelyImport(chunk.code)) { // 它把此chunk代码中的import语句以及注释替换为空然后.length做了个取反操作 - 正常情况下为false
+            // isEntirelyImport意为是否为完全的导入
             canInlineEntry = true
           }
 
           // when not inlined, inject <script> for entry and modulepreload its dependencies
           // when inlined, discard entry chunk and inject <script> for everything in post-order
-          const imports = getImportedChunks(chunk)
+          const imports = getImportedChunks(chunk) // 获取此入口chunk中的导入
           let assetTags: HtmlTagDescriptor[]
-          if (canInlineEntry) {
+          if (canInlineEntry) { // 可以内联入口
             assetTags = imports.map((chunk) =>
-              toScriptTag(chunk, toOutputAssetFilePath, isAsync)
-            )
+              toScriptTag(chunk, toOutputAssetFilePath, isAsync) // 转成type是module的外部script标签
+            ) // 把chunk中的导入转为script标签
           } else {
             const { modulePreload } = config.build
             const resolveDependencies =
               typeof modulePreload === 'object' &&
               modulePreload.resolveDependencies
-            const importsFileNames = imports.map((chunk) => chunk.fileName)
+            const importsFileNames = imports.map((chunk) => chunk.fileName) // chunk中存在的导入
             const resolvedDeps = resolveDependencies
               ? resolveDependencies(chunk.fileName, importsFileNames, {
                   hostId: relativeUrlPath,
@@ -746,22 +829,28 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
                 })
               : importsFileNames
             assetTags = [
-              toScriptTag(chunk, toOutputAssetFilePath, isAsync),
-              ...resolvedDeps.map((i) => toPreloadTag(i, toOutputAssetFilePath))
+              toScriptTag(chunk, toOutputAssetFilePath, isAsync), // 转成type是module的外部script标签，src的值就是chunk的filename所处理后的url
+              ...resolvedDeps.map((i) => toPreloadTag(i, toOutputAssetFilePath)) // 转成link标签带有模块预加载的rel
             ]
           }
+          // 转为css link标签收集到资源标签数组中
           assetTags.push(...getCssTagsForChunk(chunk, toOutputAssetFilePath))
 
+          // 把转换后的标签信息（包含chunk路径url在标签信息中）统一注入到结果字符串中去
           result = injectToHead(result, assetTags)
         }
 
+        // ***默认是分割的***
+
+        // 就是css代码不分割的话，那么就把这个chunk转为link标签形式注入到html中
+        // 当配置中的css代码分割是false时则注入css link标签
         // inject css link when cssCodeSplit is false
         if (!config.build.cssCodeSplit) {
           const cssChunk = Object.values(bundle).find(
-            (chunk) => chunk.type === 'asset' && chunk.name === 'style.css'
+            (chunk) => chunk.type === 'asset' && chunk.name === 'style.css' // 这个在cssPostPlugin中的generateBundle钩子函数中做的
           ) as OutputAsset | undefined
           if (cssChunk) {
-            result = injectToHead(result, [
+            result = injectToHead(result, [ // 也是把link style标签注入到head标签里面去
               {
                 tag: 'link',
                 attrs: {
@@ -773,29 +862,36 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
           }
         }
 
+        // html字符串中出现<div style="background-image: url(...)">这种形式的
+        // 和<style>...</style>这种的
+
         // no use assets plugin because it will emit file
         let match: RegExpExecArray | null
         let s: MagicString | undefined
-        while ((match = inlineCSSRE.exec(result))) {
+        while ((match = inlineCSSRE.exec(result))) { // 对结果字符串进行匹配内联css正则
+          // const inlineCSSRE = /__VITE_INLINE_CSS__([a-z\d]{8}_\d+)__/g
           s ||= new MagicString(result)
           const { 0: full, 1: scopedName } = match
-          const cssTransformedCode = htmlProxyResult.get(scopedName)!
+          const cssTransformedCode = htmlProxyResult.get(scopedName)! // 之前缓存中获取结果
+          // 这个结果是在css.ts中的插件中经过编译后的css代码啦~
           s.overwrite(
             match.index,
             match.index + full.length,
-            cssTransformedCode,
+            cssTransformedCode, // 重写经过编译后的css代码啦 ~
             { contentOnly: true }
           )
         }
         if (s) {
           result = s.toString()
         }
+        // 应用对于html字符串的**后置**转换钩子函数
         result = await applyHtmlTransforms(result, postHooks, {
           path: '/' + relativeUrlPath,
           filename: id,
           bundle,
           chunk
         })
+        // 替换资源url
         // resolve asset url references
         result = result.replace(assetUrlRE, (_, fileHash, postfix = '') => {
           return (
@@ -803,6 +899,7 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
           )
         })
 
+        // 替换public资源url正则
         result = result.replace(publicAssetUrlRE, (_, fileHash) => {
           return normalizePath(
             toOutputPublicAssetFilePath(
@@ -811,12 +908,62 @@ export function buildHtmlPlugin(config: ResolvedConfig): Plugin {
           )
         })
 
+        /**
+         * 
+         * 举例：
+         * index.html
+         * <script type="module" src="/main.js"><script>
+         * foo.js
+         * export default 'foo'
+         * 
+         * main.js
+         * import foo from './foo'
+         * import './style.css' // 主要是css.ts中做的事情（大致为利用treeshaking机制导致最终chunk中没有此代码，另外利用renderChunk钩子在其中向bundle对象中发射文件用于生成css文件）
+         * console.log(foo)
+         * 
+         * 那么js就是入口chunk所以它会生成写入文件系统中
+         * html文件的生成就在下方，以及里面引入打包后的结果逻辑就在上方...
+         * 
+         * 最终生成的文件
+         * index.html
+         * // 注意type="module"时默认就是defer的
+         * <head><script type="module" crossorigin src="/index.[hash].js"><script><link rel="stylesheet" href="/index.[hash].css"></link></head>
+         * 
+         * index.[hash].js
+         * ...modulePreload垫片...console.log('foo')
+         * 
+         * index.[hash].css
+         * ...
+         * 
+         */
+
+        // 默认情况下为true && false
+        // 有入口chunk且可以内联入口（意思就是直接把入口chunk中的导入全部直接放在script标签中了，这样一来入口chunK中没有内容了，那么就可以把其删除掉了）
+        // 但是正常情况下还是有内容的，所以入口chunk是不可以进行内联的
         if (chunk && canInlineEntry) {
+          // ***所有从入口的导入都内联到了html字符串中啦，删除掉它以防止rollup将其输出***
           // all imports from entry have been inlined to html, prevent rollup from outputting it
-          delete bundle[chunk.fileName]
+          // ***
+          delete bundle[chunk.fileName] // ***在最终传入的bundle中把入口chunk给删除掉***
+          // 去掉入口chunk
+          // ***
+
+          // ***
+          // 注意是有入口chunk且可以内联入口时才进行此操作的
+          // ***
+
+          // 因为上方把也就是transform钩子函数中所拼接的入口的导入字符串都一一转换成了html中标签形式
+          // 所以说这里最终的chunk中就不需要这个拼接产生的chunk了，直接给其删除掉就可以啦~
+          // 因为它里面最终产出的bundle后的结果中的import的url都提取出来了，所以也就不需要了，直接删除
+          // ***这样rollup就不会把该入口chunk也给生成出来了***
         }
 
         const shortEmitName = normalizePath(path.relative(config.root, id))
+        // ***
+        // ***
+        // 这个函数主要就是向bundle对象中存入要写入的文件对应的信息的
+        // 在最终生成的文件中会出现一个.html文件的，内容就是这里的result
+        // ***
         this.emitFile({
           type: 'asset',
           fileName: shortEmitName,

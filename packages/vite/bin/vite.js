@@ -57,5 +57,5 @@ if (profileIndex > 0) {
     session.post('Profiler.start', start)
   })
 } else {
-  start()
+  start() // 命令的入口
 }

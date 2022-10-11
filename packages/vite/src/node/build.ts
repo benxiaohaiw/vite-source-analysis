@@ -409,14 +409,15 @@ const parallelBuilds: RollupBuild[] = []
 export async function build(
   inlineConfig: InlineConfig = {}
 ): Promise<RollupOutput | RollupOutput[] | RollupWatcher> {
-  parallelCallCounts++
+  parallelCallCounts++ // 让并行调用数量加加
   try {
-    return await doBuild(inlineConfig)
+    return await doBuild(inlineConfig) // 做构建
   } finally {
+    // 减减
     parallelCallCounts--
     if (parallelCallCounts <= 0) {
-      await Promise.all(parallelBuilds.map((bundle) => bundle.close()))
-      parallelBuilds.length = 0
+      await Promise.all(parallelBuilds.map((bundle) => bundle.close())) // 并发执行，让每一个bundle关闭
+      parallelBuilds.length = 0 // 清空并行构建数组
     }
   }
 }
@@ -424,7 +425,7 @@ export async function build(
 async function doBuild(
   inlineConfig: InlineConfig = {}
 ): Promise<RollupOutput | RollupOutput[] | RollupWatcher> {
-  const config = await resolveConfig(inlineConfig, 'build', 'production')
+  const config = await resolveConfig(inlineConfig, 'build', 'production') // 解析出构建build配置
   const options = config.build
   const ssr = !!options.ssr
   const libOptions = options.lib
@@ -442,7 +443,11 @@ async function doBuild(
     ? options.rollupOptions?.input || resolve(libOptions.entry)
     : typeof options.ssr === 'string'
     ? resolve(options.ssr)
-    : options.rollupOptions?.input || resolve('index.html')
+    : options.rollupOptions?.input || resolve('index.html') // ***对于build构建的话，默认入口是工程项目下的index.html文件***
+  // ***
+  // 对于默认是index.html作为入口文件的话，主要是在html.ts中的buildHtmlPlugin插件中来去做的
+  // 详细可查看该插件中的具体解析逻辑
+  // ***
 
   if (ssr && typeof input === 'string' && input.endsWith('.html')) {
     throw new Error(
@@ -451,11 +456,11 @@ async function doBuild(
     )
   }
 
-  const outDir = resolve(options.outDir)
+  const outDir = resolve(options.outDir) // 产生输出目录
 
   // inject ssr arg to plugin load/transform hooks
   const plugins = (
-    ssr ? config.plugins.map((p) => injectSsrFlagToHooks(p)) : config.plugins
+    ssr ? config.plugins.map((p) => injectSsrFlagToHooks(p)) : config.plugins // 不是ssr的话那么直接配置中的插件
   ) as Plugin[]
 
   const userExternal = options.rollupOptions?.external
@@ -468,8 +473,9 @@ async function doBuild(
     external = await cjsSsrResolveExternal(config, userExternal)
   }
 
+  // 依赖优化器是否已开启
   if (isDepsOptimizerEnabled(config, ssr)) {
-    await initDepsOptimizer(config)
+    await initDepsOptimizer(config) // 初始化依赖优化器
   }
 
   const rollupOptions: RollupOptions = {
@@ -480,7 +486,7 @@ async function doBuild(
       ? 'strict'
       : false,
     ...options.rollupOptions,
-    input,
+    input, // 入口
     plugins,
     external,
     onwarn(warning, warn) {
@@ -502,6 +508,7 @@ async function doBuild(
   }
 
   try {
+    // 生成构建输出参数
     const buildOutputOptions = (output: OutputOptions = {}): OutputOptions => {
       // See https://github.com/vitejs/vite/issues/5812#issuecomment-984345618
       // @ts-ignore
@@ -517,7 +524,7 @@ async function doBuild(
       const ssrWorkerBuild = ssr && config.ssr.target === 'webworker'
       const cjsSsrBuild = ssr && config.ssr.format === 'cjs'
 
-      const format = output.format || (cjsSsrBuild ? 'cjs' : 'es')
+      const format = output.format || (cjsSsrBuild ? 'cjs' : 'es') // 默认打包格式是es
       const jsExt =
         ssrNodeBuild || libOptions
           ? resolveOutputJsExtension(format, getPkgJson(config.root)?.type)
@@ -560,6 +567,7 @@ async function doBuild(
       config.logger
     )
 
+    // 配置中是否watch，开启则让rollup观察文件改变
     // watch file changes with rollup
     if (config.build.watch) {
       config.logger.info(colors.cyan(`\nwatching for file changes...`))
@@ -604,10 +612,13 @@ async function doBuild(
       return watcher
     }
 
+    // 比较简单，只是解析配置选项，然后直接丢给rollup来去做的
+
+    // 让rollup写入或者生成文件
     // write or generate files with rollup
     const { rollup } = await import('rollup')
-    const bundle = await rollup(rollupOptions)
-    parallelBuilds.push(bundle)
+    const bundle = await rollup(rollupOptions) // 直接执行rollup函数
+    parallelBuilds.push(bundle) // 推入并行构建数组中
 
     const generate = (output: OutputOptions = {}) => {
       return bundle[options.write ? 'write' : 'generate'](
@@ -616,7 +627,7 @@ async function doBuild(
     }
 
     if (options.write) {
-      prepareOutDir(outDir, options.emptyOutDir, config)
+      prepareOutDir(outDir, options.emptyOutDir, config) // 准备输出目录
     }
 
     if (Array.isArray(outputs)) {
@@ -626,7 +637,7 @@ async function doBuild(
       }
       return res
     } else {
-      return await generate(outputs)
+      return await generate(outputs) // 生成
     }
   } catch (e) {
     outputBuildError(e)

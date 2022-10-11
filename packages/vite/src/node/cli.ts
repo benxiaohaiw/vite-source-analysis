@@ -164,10 +164,12 @@ cli
   )
   .option('-w, --watch', `[boolean] rebuilds when modules have changed on disk`)
   .action(async (root: string, options: BuildOptions & GlobalCLIOptions) => {
+    // 动态导入build模块
     const { build } = await import('./build')
-    const buildOptions: BuildOptions = cleanOptions(options)
+    const buildOptions: BuildOptions = cleanOptions(options) // 处理options
 
     try {
+      // 直接执行一个build方法
       await build({
         root,
         base: options.base,

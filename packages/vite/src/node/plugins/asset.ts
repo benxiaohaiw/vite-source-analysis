@@ -140,6 +140,7 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
     name: 'vite:asset',
 
     buildStart() {
+      // 增加存储
       assetCache.set(config, new Map())
       emittedHashMap.set(config, new Set())
       duplicateAssets.set(config, new Map())
@@ -194,6 +195,7 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
     },
 
     renderChunk(code, chunk, opts) {
+      // 主要就是在代码中渲染资源url的
       const s = renderAssetUrlInJS(this, config, chunk, opts, code)
 
       if (s) {
@@ -208,7 +210,7 @@ export function assetPlugin(config: ResolvedConfig): Plugin {
 
     generateBundle(_, bundle) {
       // do not emit assets for SSR build
-      if (config.command === 'build' && config.build.ssr) {
+      if (config.command === 'build' && config.build.ssr) { // 要求是build且是ssr
         for (const file in bundle) {
           if (
             bundle[file].type === 'asset' &&

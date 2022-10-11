@@ -22,9 +22,9 @@ export function modulePreloadPolyfillPlugin(config: ResolvedConfig): Plugin {
           return ''
         }
         if (!polyfillString) {
-          polyfillString = `${isModernFlag}&&(${polyfill.toString()}());`
+          polyfillString = `${isModernFlag}&&(${polyfill.toString()}());` // 自执行函数
         }
-        return polyfillString
+        return polyfillString // 主要就是返回这个字符串
       }
     }
   }
@@ -55,14 +55,16 @@ declare const document: any
 declare const MutationObserver: any
 declare const fetch: any
 
+// 垫片
 function polyfill() {
   const relList = document.createElement('link').relList
-  if (relList && relList.supports && relList.supports('modulepreload')) {
+  if (relList && relList.supports && relList.supports('modulepreload')) { // rel是否支持modulepreload选项，支持的话那么就不做垫片处理啦~
     return
   }
 
   for (const link of document.querySelectorAll('link[rel="modulepreload"]')) {
-    processPreload(link)
+    // 处理预加载
+    processPreload(link) // ***主要逻辑就是使用fetch进行请求***
   }
 
   new MutationObserver((mutations: any) => {
@@ -75,8 +77,9 @@ function polyfill() {
           processPreload(node)
       }
     }
-  }).observe(document, { childList: true, subtree: true })
+  }).observe(document, { childList: true, subtree: true }) // 观测document
 
+  // 获取请求参数
   function getFetchOpts(script: any) {
     const fetchOpts = {} as any
     if (script.integrity) fetchOpts.integrity = script.integrity
@@ -88,13 +91,14 @@ function polyfill() {
     return fetchOpts
   }
 
+  // 处理预加载
   function processPreload(link: any) {
     if (link.ep)
       // ep marker = processed
       return
-    link.ep = true
+    link.ep = true // 标记
     // prepopulate the load record
-    const fetchOpts = getFetchOpts(link)
-    fetch(link.href, fetchOpts)
+    const fetchOpts = getFetchOpts(link) // 获取请求参数（通过link标签的选项转化为下一步fetch时的对应的选项参数）
+    fetch(link.href, fetchOpts) // 直接使用fetch函数进行请求
   }
 }

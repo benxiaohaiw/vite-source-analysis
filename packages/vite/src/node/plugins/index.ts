@@ -41,13 +41,14 @@ export async function resolvePlugins(
 
   return [
     isWatch ? ensureWatchPlugin() : null,
-    isBuild ? metadataPlugin() : null,
+    isBuild ? metadataPlugin() : null, // 构建时主要在renderChunk钩子中给每一个chunk对象添加viteMetadata属性，其中共vite使用
     preAliasPlugin(config),
     aliasPlugin({ entries: config.resolve.alias }),
     ...prePlugins,
     modulePreload === true ||
     (typeof modulePreload === 'object' && modulePreload.polyfill)
       ? modulePreloadPolyfillPlugin(config) // 模块预加载垫片插件
+      // 主要就是对浏览器不支持link标签rel属性的modulepreload选项做一个垫片处理（也就是直接通过fetch来去模拟预加载这个效果）
       : null,
     ...(isDepsOptimizerEnabled(config, false) ||
     isDepsOptimizerEnabled(config, true)
@@ -71,6 +72,7 @@ export async function resolvePlugins(
           ? (id) => shouldExternalizeForSSR(id, config)
           : undefined
     }),
+    // 主要就是把vite自己添加的一些inlin-css这种id形式进行解析和加载
     htmlInlineProxyPlugin(config),
     cssPlugin(config), // css插件（主要是transform内进行编译css代码）
     // undefined !== false -> true 直接应用这个esbuildPlugin - 它主要可以进行使用esbuild里面的transform函数进行转换代码（主要针对js、**ts**等都是可以的，尤其是ts）
@@ -90,7 +92,7 @@ export async function resolvePlugins(
     definePlugin(config),
     cssPostPlugin(config), // css后置插件（开发时将css代码转为js字符串返回即可）
     isBuild && config.build.ssr ? ssrRequireHookPlugin(config) : null,
-    isBuild && buildHtmlPlugin(config),
+    isBuild && buildHtmlPlugin(config), // ***构建的入口就是在这里开始的***
     workerImportMetaUrlPlugin(config),
     assetImportMetaUrlPlugin(config),
     ...buildPlugins.pre,
