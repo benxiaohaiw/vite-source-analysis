@@ -730,9 +730,9 @@ export function tryNodeResolve(
   const pkgId = possiblePkgIds.reverse().find((pkgId) => {
     // ***
     // 解析包数据
-    // 使用到了resolve库进行解析查找包的package.json文件，并把json转为对象返回
+    // 使用到了resolve包进行解析查找依赖包的package.json文件（和node的require机制算法是一样的），并把json整合有用信息转为对象返回
     // ***
-    pkg = resolvePackageData(pkgId, basedir, preserveSymlinks, packageCache)!
+    pkg = resolvePackageData(pkgId, basedir, preserveSymlinks, packageCache)! // 在package.ts中
     return pkg
   })!
 

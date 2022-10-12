@@ -45,6 +45,7 @@ export function invalidatePackageData(
   })
 }
 
+// 解析依赖包的数据
 export function resolvePackageData(
   id: string,
   basedir: string,
@@ -61,8 +62,10 @@ export function resolvePackageData(
   }
   let pkgPath: string | undefined
   try {
+    // 此放位于utils.ts中
+    // 主要使用resolve包进行查找package.json文件，返回它的路径path
     pkgPath = resolveFrom(`${id}/package.json`, basedir, preserveSymlinks)
-    pkg = loadPackageData(pkgPath, true, packageCache)
+    pkg = loadPackageData(pkgPath, true, packageCache) // 拿到package.json文件路径开始加载相关有用的数据
     if (packageCache) {
       packageCache.set(cacheKey!, pkg)
     }

@@ -137,12 +137,23 @@ try {
 
 const ssrExtensions = ['.js', '.cjs', '.json', '.node']
 
+// 返回路径
 export function resolveFrom(
   id: string,
   basedir: string,
   preserveSymlinks = false,
   ssr = false
 ): string {
+  
+  // resolve包，它主要实现了node的require.resolve()算法，具体可查看文档
+  // https://github.com/browserify/resolve/tree/v1.22.1
+  /**
+   * 
+   * implements the node require.resolve() algorithm such that you can require.resolve() on behalf of a file asynchronously and synchronously
+   * 
+   * https://nodejs.org/api/modules.html#modules_all_together
+   * 
+   */
   return resolve.sync(id, {
     basedir,
     paths: [],
